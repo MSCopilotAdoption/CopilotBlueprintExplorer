@@ -1,0 +1,390 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "18278377620049417912"
+    },
+    "description": "Copilot Blueprint Explorer: the Azure resources, in one click. Entra objects (the access group and the app registration) are created by hand first; see README.md, Stage 1."
+  },
+  "parameters": {
+    "apiClientId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "metadata": {
+        "description": "Application (client) ID of the \"Copilot Blueprint Explorer\" app registration created in Stage 1."
+      }
+    },
+    "securityGroupObjectId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Object ID of the Entra security group whose members may use the console. Leave empty to set it later under Settings, Users, or to use named people instead."
+      }
+    },
+    "deployerObjectId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Object ID of the person who will run Stage 2. They get Contributor on this resource group only. Leave empty if the administrator runs Stage 2 too."
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "cbx",
+      "minLength": 2,
+      "maxLength": 6,
+      "metadata": {
+        "description": "Short prefix for resource names. Lowercase letters and digits only."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for every resource."
+      }
+    },
+    "webAppName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Web app name, which becomes https://<name>.azurewebsites.net and must be globally unique. Leave empty to generate one."
+      }
+    },
+    "webAppSku": {
+      "type": "string",
+      "defaultValue": "B1",
+      "allowedValues": [
+        "B1",
+        "B2",
+        "P0v3",
+        "P1v3"
+      ],
+      "metadata": {
+        "description": "App Service plan size. B1 is enough for one customer."
+      }
+    },
+    "deploymentOption": {
+      "type": "string",
+      "defaultValue": "NoAskCbx",
+      "allowedValues": [
+        "NoAskCbx",
+        "AskCbx",
+        "Minimal"
+      ],
+      "metadata": {
+        "description": "NoAskCbx: the full console. AskCbx: adds the optional AskCBX assistant against your own Foundry project. Minimal: no how-to-fix guidance."
+      }
+    },
+    "createAutomationAccount": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Create the Automation account that runs the Purview and Power Platform collection runbooks, with the PowerShell modules they need."
+      }
+    },
+    "runbookBaseUrl": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Leave empty. The Deploy to Azure button then imports the runbooks from the runbooks folder next to this template. Only set it to use another copy: a public base URL ending in a slash. Loaded from a file, the template imports nothing and you import the two runbooks in Stage 2."
+      }
+    },
+    "purviewCollectorAppId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Application (client) ID of the Purview collector app registration, if you created one in Stage 1. Can be set later under Settings."
+      }
+    },
+    "purviewOrganization": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Your tenant's primary onmicrosoft.com domain, for example contoso.onmicrosoft.com. Needed by the Purview collector."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {
+        "workload": "copilot-blueprint-explorer"
+      }
+    }
+  },
+  "variables": {
+    "suffix": "[toLower(uniqueString(resourceGroup().id))]",
+    "siteName": "[if(empty(parameters('webAppName')), format('{0}-app-{1}', parameters('namePrefix'), variables('suffix')), parameters('webAppName'))]",
+    "automationName": "[format('{0}-aa-{1}', parameters('namePrefix'), variables('suffix'))]",
+    "templateUri": "[coalesce(tryGet(tryGet(deployment().properties, 'templateLink'), 'uri'), '')]",
+    "runbookBase": "[if(not(empty(parameters('runbookBaseUrl'))), parameters('runbookBaseUrl'), if(empty(variables('templateUri')), '', uri(variables('templateUri'), 'runbooks/')))]",
+    "importRunbooks": "[and(parameters('createAutomationAccount'), not(empty(variables('runbookBase'))))]",
+    "roles": {
+      "contributor": "b24988ac-6180-42a0-ab88-20f7382dd24c",
+      "reader": "acdd72a7-3385-48ef-bd42-f606fba81ae7",
+      "automationJobOperator": "4fe576fe-1146-4730-92eb-48519fa6bf9f"
+    },
+    "modules": [
+      {
+        "name": "ExchangeOnlineManagement",
+        "version": "3.5.1"
+      },
+      {
+        "name": "MicrosoftTeams",
+        "version": "8.0.0"
+      },
+      {
+        "name": "Microsoft.Online.SharePoint.PowerShell",
+        "version": "16.0.27612.12000"
+      }
+    ],
+    "runbooks": [
+      "Get-CbxDlpPolicies",
+      "Get-CbxPowerPlatform"
+    ]
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[format('{0}-uami-{1}', parameters('namePrefix'), variables('suffix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}-plan-{1}', parameters('namePrefix'), variables('suffix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "kind": "linux",
+      "sku": {
+        "name": "[parameters('webAppSku')]"
+      },
+      "properties": {
+        "reserved": true
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2024-11-01",
+      "name": "[variables('siteName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "kind": "app,linux",
+      "identity": {
+        "type": "SystemAssigned, UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-uami-{1}', parameters('namePrefix'), variables('suffix'))))]": {}
+        }
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', format('{0}-plan-{1}', parameters('namePrefix'), variables('suffix')))]",
+        "httpsOnly": true,
+        "siteConfig": {
+          "linuxFxVersion": "DOTNETCORE|8.0",
+          "minTlsVersion": "1.2",
+          "ftpsState": "Disabled",
+          "http20Enabled": true,
+          "alwaysOn": true,
+          "healthCheckPath": "/api/health",
+          "appSettings": [
+            {
+              "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
+              "value": "false"
+            },
+            {
+              "name": "Cbx__TenantId",
+              "value": "[subscription().tenantId]"
+            },
+            {
+              "name": "Cbx__ApiClientId",
+              "value": "[parameters('apiClientId')]"
+            },
+            {
+              "name": "Cbx__SpaClientId",
+              "value": "[parameters('apiClientId')]"
+            },
+            {
+              "name": "Cbx__UserAssignedClientId",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-uami-{1}', parameters('namePrefix'), variables('suffix'))), '2023-01-31').clientId]"
+            },
+            {
+              "name": "Cbx__SecurityGroupObjectId",
+              "value": "[parameters('securityGroupObjectId')]"
+            },
+            {
+              "name": "Cbx__SubscriptionId",
+              "value": "[subscription().subscriptionId]"
+            },
+            {
+              "name": "Cbx__DeploymentOption",
+              "value": "[parameters('deploymentOption')]"
+            },
+            {
+              "name": "Cbx__AutomationResourceGroup",
+              "value": "[if(parameters('createAutomationAccount'), resourceGroup().name, '')]"
+            },
+            {
+              "name": "Cbx__AutomationAccountName",
+              "value": "[if(parameters('createAutomationAccount'), variables('automationName'), '')]"
+            },
+            {
+              "name": "Cbx__PurviewCollectorAppId",
+              "value": "[parameters('purviewCollectorAppId')]"
+            },
+            {
+              "name": "Cbx__PurviewOrganization",
+              "value": "[parameters('purviewOrganization')]"
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', format('{0}-plan-{1}', parameters('namePrefix'), variables('suffix')))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-uami-{1}', parameters('namePrefix'), variables('suffix')))]"
+      ]
+    },
+    {
+      "condition": "[parameters('createAutomationAccount')]",
+      "type": "Microsoft.Automation/automationAccounts",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('automationName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "sku": {
+          "name": "Basic"
+        }
+      }
+    },
+    {
+      "copy": {
+        "name": "automationModules",
+        "count": "[length(variables('modules'))]"
+      },
+      "condition": "[parameters('createAutomationAccount')]",
+      "type": "Microsoft.Automation/automationAccounts/modules",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('automationName'), variables('modules')[copyIndex()].name)]",
+      "properties": {
+        "contentLink": {
+          "uri": "[format('https://www.powershellgallery.com/api/v2/package/{0}/{1}', variables('modules')[copyIndex()].name, variables('modules')[copyIndex()].version)]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationName'))]"
+      ]
+    },
+    {
+      "copy": {
+        "name": "automationRunbooks",
+        "count": "[length(variables('runbooks'))]"
+      },
+      "condition": "[variables('importRunbooks')]",
+      "type": "Microsoft.Automation/automationAccounts/runbooks",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('automationName'), variables('runbooks')[copyIndex()])]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "runbookType": "PowerShell",
+        "logProgress": false,
+        "logVerbose": false,
+        "publishContentLink": {
+          "uri": "[format('{0}{1}.ps1', variables('runbookBase'), variables('runbooks')[copyIndex()])]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('createAutomationAccount')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Automation/automationAccounts', variables('automationName'))]",
+      "name": "[guid(resourceId('Microsoft.Automation/automationAccounts', variables('automationName')), resourceId('Microsoft.Web/sites', variables('siteName')), variables('roles').automationJobOperator)]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roles').automationJobOperator)]",
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('siteName')), '2024-11-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationName'))]",
+        "[resourceId('Microsoft.Web/sites', variables('siteName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('createAutomationAccount')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Automation/automationAccounts', variables('automationName'))]",
+      "name": "[guid(resourceId('Microsoft.Automation/automationAccounts', variables('automationName')), resourceId('Microsoft.Web/sites', variables('siteName')), variables('roles').reader)]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roles').reader)]",
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('siteName')), '2024-11-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationName'))]",
+        "[resourceId('Microsoft.Web/sites', variables('siteName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('deployerObjectId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceGroup().id, parameters('deployerObjectId'), variables('roles').contributor)]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roles').contributor)]",
+        "principalId": "[parameters('deployerObjectId')]",
+        "principalType": "User"
+      }
+    }
+  ],
+  "outputs": {
+    "webAppName": {
+      "type": "string",
+      "value": "[variables('siteName')]"
+    },
+    "webAppUrl": {
+      "type": "string",
+      "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites', variables('siteName')), '2024-11-01').defaultHostName)]"
+    },
+    "managedIdentityName": {
+      "type": "string",
+      "value": "[format('{0}-uami-{1}', parameters('namePrefix'), variables('suffix'))]"
+    },
+    "managedIdentityClientId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-uami-{1}', parameters('namePrefix'), variables('suffix'))), '2023-01-31').clientId]"
+    },
+    "managedIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-uami-{1}', parameters('namePrefix'), variables('suffix'))), '2023-01-31').principalId]"
+    },
+    "webAppSystemIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/sites', variables('siteName')), '2024-11-01', 'full').identity.principalId]"
+    },
+    "automationAccountName": {
+      "type": "string",
+      "value": "[if(parameters('createAutomationAccount'), variables('automationName'), '')]"
+    },
+    "automationAccountPrincipalId": {
+      "type": "string",
+      "value": "[if(parameters('createAutomationAccount'), reference(resourceId('Microsoft.Automation/automationAccounts', variables('automationName')), '2023-11-01', 'full').identity.principalId, '')]"
+    },
+    "runbooksImportedFrom": {
+      "type": "string",
+      "value": "[if(variables('importRunbooks'), variables('runbookBase'), 'not imported: import the two runbooks in Stage 2 (2.4)')]"
+    }
+  }
+}
