@@ -1500,6 +1500,7 @@ try {
         groupsError           = $null
         copilotUsage          = $null
         copilotUsageError     = $null
+        mailProtection        = $null
     }
     try {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
@@ -1533,6 +1534,70 @@ try {
                     ForEach-Object { "$($_.ExternalDirectoryObjectId)" })
         }
         catch { $exchange.groupsError = $_.Exception.Message }
+
+        # ---- Defender for Office 365 and Exchange Online Protection -------------------------
+        # Prompt injection protection needs no switch: Defender for Office 365 Plan 2 classifies
+        # injection content during mail flow and files it under High confidence phishing. So the
+        # setting that decides the outcome is that verdict's action, which every tenant has through
+        # Exchange Online Protection. Safe Links is the Defender-only half, and its cmdlets simply
+        # do not exist without the licence - which is how an unlicensed tenant is told apart from a
+        # failed read, rather than being scored as though the control were absent by choice.
+        $mail = [ordered]@{
+            licensed       = $null
+            error          = $null
+            spamPolicies   = @()
+            spamError      = $null
+            safeLinks      = @()
+            safeLinksError = $null
+        }
+        try {
+            $mail.spamPolicies = @(Get-HostedContentFilterPolicy -ErrorAction Stop | ForEach-Object {
+                    [ordered]@{
+                        name                     = [string]$_.Name
+                        isDefault                = Get-CbxBool $_ 'IsDefault'
+                        highConfidencePhishAction = "$($_.HighConfidencePhishAction)"
+                    }
+                })
+        }
+        catch { $mail.spamError = $_.Exception.Message }
+
+        if (-not (Get-Command Get-SafeLinksPolicy -ErrorAction SilentlyContinue)) {
+            $mail.licensed = $false
+            $mail.safeLinksError = 'cmdlet_absent'
+        }
+        else {
+            try {
+                # A policy only applies through an enabled rule, so the rules decide the real scope.
+                $safeLinksRules = @(Get-SafeLinksRule -ErrorAction Stop)
+                $mail.safeLinks = @(Get-SafeLinksPolicy -ErrorAction Stop | ForEach-Object {
+                        $policyName = [string]$_.Name
+                        $rules = @($safeLinksRules | Where-Object { "$($_.SafeLinksPolicy)" -eq $policyName })
+                        $enabled = @($rules | Where-Object { "$($_.State)" -eq 'Enabled' })
+                        # No recipient condition at all means the rule covers everyone.
+                        $whole = @($enabled | Where-Object {
+                                @($_.SentTo).Count -eq 0 -and @($_.SentToMemberOf).Count -eq 0 -and @($_.RecipientDomainIs).Count -eq 0
+                            }).Count -gt 0
+                        [ordered]@{
+                            name        = $policyName
+                            email       = Get-CbxBool $_ 'EnableSafeLinksForEmail'
+                            teams       = Get-CbxBool $_ 'EnableSafeLinksForTeams'
+                            office      = Get-CbxBool $_ 'EnableSafeLinksForOffice'
+                            scanUrls    = Get-CbxBool $_ 'ScanUrls'
+                            trackClicks = Get-CbxBool $_ 'TrackClicks'
+                            ruleEnabled = $enabled.Count -gt 0
+                            wholeTenant = $whole
+                        }
+                    })
+                $mail.licensed = $true
+            }
+            catch {
+                $message = $_.Exception.Message
+                # Defender refuses the cmdlet outright when the tenant holds no plan for it.
+                if ($message -match 'not licensed|no licen[cs]e|subscription') { $mail.licensed = $false }
+                $mail.safeLinksError = $message
+            }
+        }
+        $exchange.mailProtection = $mail
 
         # Evidence of what Copilot actually did, which no setting can show: where it ran and which
         # model providers processed prompts. Auto-routed requests do not always name a model.
