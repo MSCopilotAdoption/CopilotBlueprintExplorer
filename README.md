@@ -31,7 +31,7 @@ Deployment takes **three stages**, all in the Azure and Entra portals. Azure Clo
 | Web app (.NET 8, Linux) | The console and its API. HTTPS only, TLS 1.2, FTP disabled, Always On, health check on `/api/health`. |
 | Web app **system-assigned** managed identity | Every app-only read of Microsoft Graph and Azure. Starts and reads the collection runbooks. |
 | **User-assigned** managed identity | Nothing but the federated credential that lets the API act for the signed-in person without a client secret. |
-| Automation account (Basic) *(optional)* | Runs the two collection runbooks. Holds the Purview collector's certificate. Its own identity reads Power Platform. |
+| Automation account (Basic) *(optional)* | Runs the two collection runbooks. Holds the Purview collector's certificate. Its own identity reads Power Platform. The template imports two PowerShell modules into it; the third (MicrosoftTeams) is imported in Stage 2. |
 
 Two Azure role assignments are made, and nothing wider: the web app's identity gets **Automation Job Operator** and **Reader** on the Automation account. If a deployer is named, they get **Contributor** on the resource group.
 
@@ -322,7 +322,7 @@ Select the resource group from 1.3, then fill in:
 | Purview Collector App Id | From step 1.6, if you create it now. Can be set later in Settings. |
 | Purview Organization | Your primary `onmicrosoft.com` domain, for example `contoso.onmicrosoft.com`. |
 
-**Review + create → Create.** It takes about five minutes; the Automation modules keep importing for a while after that (Stage 2 checks them).
+**Review + create → Create.** It takes about five to ten minutes, most of it importing two PowerShell modules into the Automation account. The third module, MicrosoftTeams, is left to Stage 2 (2.4), so a slow import cannot hold up the deployment.
 
 When it finishes, open **Outputs** and copy every value onto the handover sheet. `runbooksImportedFrom` shows whether the runbooks were imported, or need importing in 2.4.
 
@@ -553,15 +553,19 @@ If you used **Option A**, everything below is already set. **Check it and move o
 
 Skip this if no Automation account was created.
 
-1. **Modules:** Automation account **→ Shared resources → Modules.** These three must show **Available**. Importing can take up to 15 minutes after deployment.
+1. **Modules:** Automation account **→ Shared resources → Modules.**
 
-   | Module | Tested version |
-   |---|---|
-   | ExchangeOnlineManagement | 3.5.1 |
-   | MicrosoftTeams | 8.0.0 |
-   | Microsoft.Online.SharePoint.PowerShell | 16.0.27612.12000 |
+   | Module | Tested version | Imported by | Needed for |
+   |---|---|---|---|
+   | ExchangeOnlineManagement | 3.5.1 | The template (Option A) | Everything the Purview runbook collects. Required. |
+   | Microsoft.Online.SharePoint.PowerShell | 16.0.27612.12000 | The template (Option A) | SharePoint and OneDrive tenant settings. Optional. |
+   | MicrosoftTeams | 8.0.0 | **You, here** | Teams app permission and setup policies. Optional. |
 
-   *Option B:* **Add a module → Browse for file.** Upload each tested version: on its PowerShell Gallery page (for example `https://www.powershellgallery.com/packages/ExchangeOnlineManagement/3.5.1`), open **Manual Download**, download the `.nupkg` and rename it to `.zip`. Set Runtime version **5.1**. *Browse from gallery* also works, but installs the newest version, which has not been tested with these runbooks.
+   **Import MicrosoftTeams yourself.** It is 22 MB and can take 5 to 20 minutes to import, which is why the template leaves it out. Without it the runbook still runs, and the Teams checks remain manual answers with the reason shown. The Cloud Shell block below does this in one step. By hand: **Add a module → Browse for file**, and upload version 8.0.0. On its PowerShell Gallery page (`https://www.powershellgallery.com/packages/MicrosoftTeams/8.0.0`), open **Manual Download**, download the `.nupkg` and rename it to `.zip`. Set Runtime version **5.1**.
+
+   Wait until every module shows **Available** before the first **Collect from Purview**. If an import is still *Importing* after 30 minutes, it is stuck: delete that module and import it again.
+
+   *Option B:* import all three the same way. *Browse from gallery* also works, but installs the newest version, which has not been tested with these runbooks.
 2. **Runbooks:** **Process automation → Runbooks.** You need `Get-CbxDlpPolicies` and `Get-CbxPowerPlatform`, both **Published**.
 
    If they are missing (the template was loaded from a file, or Option B):
@@ -625,13 +629,20 @@ The private key is created in Cloud Shell's temporary folder and deleted when th
     $aa  = "https://management.azure.com$aaId"
     $api = '?api-version=2023-11-01'
 
-    # 1. Modules, pinned to the tested versions. Import carries on in the background.
-    $modules = [ordered]@{ 'ExchangeOnlineManagement' = '3.5.1'; 'MicrosoftTeams' = '8.0.0'; 'Microsoft.Online.SharePoint.PowerShell' = '16.0.27612.12000' }
+    # 1. Modules, pinned to the tested versions and imported one at a time (parallel imports are prone to stalling).
+    #    The two small ones are awaited; MicrosoftTeams (22 MB) is started last and left to finish in the background.
+    $modules = [ordered]@{ 'ExchangeOnlineManagement' = '3.5.1'; 'Microsoft.Online.SharePoint.PowerShell' = '16.0.27612.12000'; 'MicrosoftTeams' = '8.0.0' }
     foreach ($name in $modules.Keys) {
         $current = try { az rest --method GET --url "$aa/modules/$name$api" --query "[properties.version,properties.provisioningState]" -o tsv 2>$null } catch { '' }
         $version, $state = @($current) -split "`t"
-        if ($version -ne $modules[$name] -or $state -eq 'Failed') {
-            Invoke-Rest PUT "$aa/modules/$name$api" @{ properties = @{ contentLink = @{ uri = "https://www.powershellgallery.com/api/v2/package/$name/$($modules[$name])" } } }
+        if ($state -and $state -notin 'Succeeded', 'Failed') { Write-Host "$name is still importing ($state); left alone."; continue }
+        if ($version -eq $modules[$name] -and $state -eq 'Succeeded') { continue }
+        Invoke-Rest PUT "$aa/modules/$name$api" @{ properties = @{ contentLink = @{ uri = "https://www.powershellgallery.com/api/v2/package/$name/$($modules[$name])" } } }
+        if ($name -ne 'MicrosoftTeams') {
+            $deadline = (Get-Date).AddMinutes(10)
+            do { Start-Sleep -Seconds 15; $state = az rest --method GET --url "$aa/modules/$name$api" --query properties.provisioningState -o tsv }
+            while ($state -notin 'Succeeded', 'Failed' -and (Get-Date) -lt $deadline)
+            Write-Host "$name import: $state"
         }
     }
 
@@ -673,7 +684,7 @@ The private key is created in Cloud Shell's temporary folder and deleted when th
 }
 ```
 
-Modules show `Succeeded` once imported; until then they show `Creating` or `ContentValidated`. Run the block again later to see the status: it skips what is already done, and leaves the certificate alone unless `$RenewCertificate` is `$true`. After a renewal, remove the old certificate from the collector app registration's **Certificates** list.
+The block waits for the two small modules (up to 10 minutes each), then starts MicrosoftTeams and moves on without waiting for it. Modules show `Succeeded` once imported; until then they show `Creating` or `ContentValidated`. Run the block again later to see the status. It skips what is done, leaves any import still in progress alone, and leaves the certificate alone unless `$RenewCertificate` is `$true`. After a renewal, remove the old certificate from the collector app registration's **Certificates** list.
 
 </details>
 

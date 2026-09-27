@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "18278377620049417912"
+      "templateHash": "11191074762346780373"
     },
     "description": "Copilot Blueprint Explorer: the Azure resources, in one click. Entra objects (the access group and the app registration) are created by hand first; see README.md, Stage 1."
   },
@@ -131,10 +131,6 @@
       {
         "name": "ExchangeOnlineManagement",
         "version": "3.5.1"
-      },
-      {
-        "name": "MicrosoftTeams",
-        "version": "8.0.0"
       },
       {
         "name": "Microsoft.Online.SharePoint.PowerShell",
@@ -267,7 +263,9 @@
     {
       "copy": {
         "name": "automationModules",
-        "count": "[length(variables('modules'))]"
+        "count": "[length(variables('modules'))]",
+        "mode": "serial",
+        "batchSize": 1
       },
       "condition": "[parameters('createAutomationAccount')]",
       "type": "Microsoft.Automation/automationAccounts/modules",

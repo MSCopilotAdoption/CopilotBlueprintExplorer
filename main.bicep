@@ -77,10 +77,10 @@ var roles = {
   automationJobOperator: '4fe576fe-1146-4730-92eb-48519fa6bf9f'
 }
 
-// Versions proven with the runbooks on Windows PowerShell 5.1.
+// Versions proven with the runbooks on Windows PowerShell 5.1. MicrosoftTeams 8.0.0 (22 MB) is imported in
+// Stage 2 instead: ARM waits for every module import, and a slow or stuck one held the whole deployment.
 var modules = [
   { name: 'ExchangeOnlineManagement', version: '3.5.1' }
-  { name: 'MicrosoftTeams', version: '8.0.0' }
   { name: 'Microsoft.Online.SharePoint.PowerShell', version: '16.0.27612.12000' }
 ]
 
@@ -161,6 +161,8 @@ resource automation 'Microsoft.Automation/automationAccounts@2023-11-01' = if (c
   }
 }
 
+// One at a time: Automation imports that run in parallel are prone to stalling.
+@batchSize(1)
 resource automationModules 'Microsoft.Automation/automationAccounts/modules@2023-11-01' = [for m in modules: if (createAutomationAccount) {
   parent: automation
   name: m.name
