@@ -73,7 +73,7 @@ Each block reuses whatever already exists, so it is safe to run again. It stops 
 3. Add as members: **yourself (the Global Administrator)**, the deployer, and the people who will use the console.
 4. **Create.** Open the group and copy its **Object ID** onto the handover sheet.
 
-> Only members of this group can use the console. The Global Administrator **must** be a member: step 3.2 depends on it.
+> Only members of this group can use the console, because **Assignment required** is switched on in step 1.2.5 — Microsoft Entra will not even issue a token to anyone else. The Global Administrator **must** be a member, or they cannot sign in to do step 3.2.
 
 <details>
 <summary><strong>Cloud Shell alternative (PowerShell)</strong></summary>
@@ -140,22 +140,20 @@ One app registration serves both the browser sign-in and the API.
      },
      ```
    > **Why `wids` matters:** the `wids` claim tells the console who is a Global Administrator. Without it, nobody can complete first-run setup or recovery, and the console cannot repair its own access. An equivalent route is **Token configuration → Add groups claim → Directory roles** only.
-4. **API permissions → Add a permission → Microsoft Graph → Delegated permissions.** Add:
+4. **API permissions → Add a permission → My APIs → Copilot Blueprint Explorer →** tick `access_as_user` → **Add permissions**.
 
-   | Permission | Why it is needed from the start |
-   |---|---|
-   | `User.Read` | Sign-in. |
-   | `Application.Read.All` | The console reads its own identities' permissions, to show what is granted. |
-   | `AppRoleAssignment.ReadWrite.All` | The console grants and revokes application permissions **as the signed-in administrator**. It can never do more than that person could in the portal. |
-   | `DelegatedPermissionGrant.ReadWrite.All` | The same, for delegated permissions. |
+   That is the only permission you add. The list should read:
 
-   Then **Add a permission → My APIs → Copilot Blueprint Explorer →** tick `access_as_user` → **Add permissions**.
+   | Permission | Type | Why |
+   |---|---|---|
+   | `User.Read` | Delegated | Sign-in. Added by Microsoft Entra when the app is registered. |
+   | `access_as_user` | Delegated | Lets the browser call this application's own API. |
 
-   Finally select **Grant admin consent for \<your organisation\>** and confirm. Every row should show *Granted*.
+   Neither requires admin consent, so there is nothing here with a **Not granted** warning. Selecting **Grant admin consent** is optional and only saves each user a one-off sign-in prompt.
 
-   > **Why these four and no others.** The last three are the console's own hands: every permission granted later in Stage 3 is written by the console acting on your behalf, using exactly these. They cannot themselves be deferred to Stage 3, because a console with no right to grant anything cannot grant itself the right to grant. Microsoft Entra has no way around that — the first consent always happens in a portal. Everything else the console ever needs is granted in Stage 3, with a stated reason for each, and can be revoked there.
+   > **Nothing else is added here, and nothing else is consented here.** Every permission this console ever uses — including the three it needs to grant permissions at all — is granted later, from inside the console, by a Global Administrator who can see what each one is for (Stage 3.2). Until that happens the application holds no access to your tenant whatsoever.
    >
-   > This is also the reason the console can never quietly acquire a permission: each of those grants is an action taken by a named administrator, recorded in the Entra audit log under *their* name, not the application's.
+   > This is why the deployment can be reviewed before it is trusted: at the end of Stage 2 the app registration is still an empty shell.
 5. **Enterprise applications →** open **Copilot Blueprint Explorer**:
    - **Properties → Assignment required? = Yes → Save.**
    - **Users and groups → Add user/group →** select the group from 1.1 **→ Assign.**
@@ -210,9 +208,10 @@ One app registration serves both the browser sign-in and the API.
         optionalClaims = @{ accessToken = @(@{ name = 'wids'; essential = $false }); idToken = @(); saml2Token = @() }
     }
 
-    # Delegated permissions: four Microsoft Graph scopes plus this app's own access_as_user, added to any already listed
+    # Delegated permissions: User.Read plus this app's own access_as_user, and deliberately nothing else.
+    # Neither needs admin consent. Everything the console uses is granted later, from inside it, in 3.2.
     $graphAppId  = '00000003-0000-0000-c000-000000000000'
-    $delegated   = 'User.Read', 'Application.Read.All', 'AppRoleAssignment.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All'
+    $delegated   = , 'User.Read'
     $graphScopes = az ad sp show --id $graphAppId --query "oauth2PermissionScopes[].{value:value,id:id}" -o json | ConvertFrom-Json
     $wanted      = @{ $graphAppId = @($delegated | ForEach-Object { $v = $_; ($graphScopes | Where-Object value -eq $v).id }); $appId = @($scopeId) }
     $rra         = @(az ad app list --filter "appId eq '$appId'" --query "[0].requiredResourceAccess" -o json | ConvertFrom-Json | Where-Object { $_ })
@@ -234,7 +233,7 @@ One app registration serves both the browser sign-in and the API.
         Invoke-Rest POST "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/appRoleAssignedTo" @{ principalId = $GroupObjectId; resourceId = $spId; appRoleId = '00000000-0000-0000-0000-000000000000' }
     }
 
-    # Admin consent for the delegated permissions: adds to any existing consent, never removes
+    # Consent for the two that need none anyway, so nobody sees a sign-in prompt. Adds, never removes.
     $graphSpId = az ad sp show --id $graphAppId --query id -o tsv
     $grants    = @((az rest --method GET --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?%24filter=clientId%20eq%20'$spId'" -o json | ConvertFrom-Json).value)
     foreach ($need in @{ resourceId = $graphSpId; scope = $delegated }, @{ resourceId = $spId; scope = @('access_as_user') }) {
@@ -726,7 +725,7 @@ That seeded entry is an ordinary one. Once the access group is working, open **S
 
 At this point the console cannot yet read group membership, so it cannot check the access group, and anyone else sees a message saying so. That is expected until 3.2.
 
-**Nothing has been granted yet, and the console is already worth walking through.** The sign-in asked for nothing beyond the four permissions in 1.2, so this is a fair thing to show a security team before they approve anything:
+**Nothing has been granted yet, and the console is already worth walking through.** The app registration asked for nothing beyond sign-in, so this is a fair thing to show a security team before they approve anything:
 
 | Where | What you can see with no permissions granted |
 |---|---|
@@ -736,20 +735,45 @@ At this point the console cannot yet read group membership, so it cannot check t
 | **Settings → Roles & permissions** | Every permission the console will ever ask for, what each is used for, and which are optional. Nothing is granted; the page is the request list. |
 | **Help** | The full document, the FAQ, and what the console reads and why. |
 
-Turn on **No scan** in the top bar first if you want a guarantee in the product itself rather than a promise: while it is on, the console reads nothing from your tenant at all. See 3.3.
+Turn on **No scan** in the top bar first if you want a guarantee in the product itself rather than a promise: while it is on, the console reads nothing from your tenant at all. See 3.4.
 
-### 3.2 Grant the two basic permissions
+> **Until 3.2 is done, the access group is not yet being enforced.** The console cannot read group membership, so it cannot check the group, and it admits only Global Administrators and named people. Everyone else is refused with a message saying the check is unavailable. Microsoft Entra is still enforcing **Assignment required** from step 1.2.5, so only people assigned to the enterprise application can obtain a token in the first place.
 
-These two application permissions let the console check who is in the access group. They are the only permissions the console needs in order to work at all.
+### 3.2 Let the console manage permissions (one approval)
 
-1. Open **Settings** (the gear icon, top right) **→ Roles & permissions →** the **Managed identity** section.
+This is the only approval that happens outside the console, and it is what makes every later step possible.
+
+Every Grant and Revoke button in this console is carried out by the application **acting as the administrator who presses it** — it can never do more than that person could do in the portal. Three delegated permissions make that work:
+
+| Permission | What it is for |
+|---|---|
+| `Application.Read.All` | Read what this deployment currently holds, so the page can show it. |
+| `AppRoleAssignment.ReadWrite.All` | Grant and revoke application permissions. |
+| `DelegatedPermissionGrant.ReadWrite.All` | The same, for delegated permissions. |
+
+They cannot be granted from inside the console, because granting is exactly what they permit — an application with no right to grant cannot grant itself the right to grant. Microsoft Entra's **admin consent endpoint** is the way out: it takes the permissions from the request rather than from the app registration, which is why the registration could be left empty in Stage 1.
+
+1. Sign in as a **Global Administrator**.
+2. **Settings → Roles & permissions.** Because nothing is consented yet, the page shows *One approval is needed before anything can be granted*, naming the three permissions above.
+3. Select **Grant admin consent in Microsoft Entra**. Microsoft's own consent page opens, listing those three. Select **Accept**.
+4. You are returned to the console. If it still says consent is missing, wait a few seconds and select **Check again** — Entra takes a moment to apply it.
+
+> Prefer to do it in the portal? **App registrations → Copilot Blueprint Explorer → API permissions → Add a permission → Microsoft Graph → Delegated**, add those three, then **Grant admin consent**. The result is identical. The button exists so that nobody has to be talked through the portal.
+
+### 3.3 Grant the access-group check
+
+These two application permissions let the console check who is in the access group. Until they are granted, the group is not enforced.
+
+1. **Settings → Roles & permissions →** the **Managed identity** section.
 2. Find **`GroupMember.Read.All`** and **`User.ReadBasic.All`**, and select **Grant** on each. Grant nothing else yet.
 3. **Restart the web app** (Azure portal → the web app → **Overview → Restart**), or ask the deployer to. Microsoft Entra writes application permissions into the identity's token, and a token issued before the grant does not have them. The restart gets a new token.
 4. Reload the console. Then go to **Settings → Users** and confirm you are listed as **SuperAdmin**.
 
+From this point the access group is the gate, alongside named people and Global Administrators.
+
 > **Be the first person to sign in after the restart.** The first member of the access group to reach the console claims the first **SuperAdmin** role. Make sure that is you, then appoint others under **Settings → Users**.
 
-### 3.3 Test without scanning anything (**No scan**)
+### 3.4 Test without scanning anything (**No scan**)
 
 This proves sign-in, the access group and roles work before the console is given any right to read your tenant.
 
@@ -760,7 +784,7 @@ This proves sign-in, the access group and roles work before the console is given
 
 If the customer is not ready to allow a scan, the console can stay in this mode. It remains a complete, manually answered assessment.
 
-### 3.4 Grant everything else for the full scan
+### 3.5 Grant everything else for the full scan
 
 Work through **Settings → Roles & permissions** from top to bottom. Every row says what it is used for. **Grant all** in each section grants only what is **required**. Optional and write-capable extras stay a separate, deliberate choice, and everything can be revoked from the same page.
 
@@ -797,9 +821,9 @@ Work through **Settings → Roles & permissions** from top to bottom. Every row 
    - **Power Platform management app → Grant.** This needs Power Platform Administrator. If the row says so, first grant *PowerApps Service* under **App registration**.
    - On the **Agent estate** page, select **Collect from Power Platform**. This discovers your Dataverse environments.
    - Back on **Roles & permissions → Automation account**, select **Grant** on **CBX agent inventory reader** for each environment. This needs System Administrator in that environment. It reads only agents and AI Builder models, deliberately not transcripts.
-5. **AskCBX**: optional, and configured here rather than at deployment. See 3.4a below.
+5. **AskCBX**: optional, and configured here rather than at deployment. See 3.5a below.
 
-### 3.4a AskCBX, and governing it in Foundry
+### 3.5a AskCBX, and governing it in Foundry
 
 **Entirely optional, and nothing here is created by the deployment.** The template creates one App Service and one Automation account, and no more. The Foundry project, the model deployment and — if you want conversation recording — the Application Insights resource are all **yours to provide**, existing or new, in whatever subscription and resource group your standards say. The console only points at what you give it. Skip this section and the rest of the console works exactly the same.
 
@@ -818,14 +842,14 @@ That is enough for a working assistant. The rest turns it into an agent you can 
    The connection is made as you, not by the app. Turning it on replaces any Application Insights connection already on the project; turning it off removes only the one this console made, and leaves the resource itself untouched.
 
 
-### 3.5 Run the full scan
+### 3.6 Run the full scan
 
 1. Switch **No scan** off.
 2. **Executive summary → Re-scan tenant.**
 3. **Governance → Collect from Purview**, and **Agent estate → Collect from Power Platform.** Both run in your Automation account and take a few minutes.
 4. Return to **Settings → Roles & permissions**. The badges should show nothing **required but missing**.
 
-Any manual answers from 3.3 stay in place. A measured reading always takes precedence over an answer, and the report says when that happened.
+Any manual answers from 3.4 stay in place. A measured reading always takes precedence over an answer, and the report says when that happened.
 
 ---
 
@@ -873,14 +897,14 @@ Some grants live outside the resource group and are **not** removed when it is d
 | **AADSTS50011** redirect URI mismatch | The SPA redirect URI in step 1.6 is missing or different. It must be exactly `https://<web-app-name>.azurewebsites.net` under **Single-page application** (not *Web*). |
 | **AADSTS65001** or "Need admin approval" | Admin consent from step 1.2.4 is missing, or `access_as_user` was not added under **My APIs**. |
 | "This application has not been configured yet" (`setup_in_progress`) | No access group is set, and the person is not a Global Administrator. Set the group ID at deployment, or under **Settings → Users**. |
-| "Access cannot be checked" (`access_gate_unavailable`) | The two basic permissions are missing, or were granted but the web app has not been restarted since (3.2). Or use named people. |
+| "Access cannot be checked" (`access_gate_unavailable`) | The access-group permissions are missing, or were granted but the web app has not been restarted since (3.3). Or use named people. |
 | "You are not a member of the group" (`not_in_access_group`) | Add the person to the access group. Membership is re-checked every 15 minutes. |
 | Global Administrator refused at first sign-in or in recovery | The `wids` claim is missing (step 1.2.3). Without it, the console cannot see the Global Administrator role. |
 | Pages fail with a federated-identity or token-exchange error | The federated credential (1.6) must name the user-assigned identity **attached to the web app**, and `Cbx__UserAssignedClientId` must be that identity's **Client ID**. |
 | Deployment log says *"Couldn't detect a version for the platform 'dotnet' in the repo"* | The zip went through a build step. That happens with Deployment Center → Publish files (new). Deploy with the 2.2 Cloud Shell block instead. |
 | Upload fails with **400**, or the app shows "Application Error" | Upload the handed-over zip unchanged (2.1). Check that `SCM_DO_BUILD_DURING_DEPLOYMENT` is `false`, the stack is .NET 8 and the startup command is empty. **Monitoring → Log stream** shows the start-up error. |
-| **Collect from Purview** fails | Automation account → **Jobs →** the latest job → **Output / Errors**. Common causes: modules not yet *Available*; certificate not named `CbxPurviewCert`; the role groups in 3.4.3 are missing; or the `.cer` was not uploaded to the collector app registration. |
-| **Collect from Power Platform** reports the identity is not registered | Grant **Power Platform management app** (3.4.4). Changes can take a few minutes to reach Power Platform. |
+| **Collect from Purview** fails | Automation account → **Jobs →** the latest job → **Output / Errors**. Common causes: modules not yet *Available*; certificate not named `CbxPurviewCert`; the role groups in 3.5.3 are missing; or the `.cer` was not uploaded to the collector app registration. |
+| **Collect from Power Platform** reports the identity is not registered | Grant **Power Platform management app** (3.5.4). Changes can take a few minutes to reach Power Platform. |
 
 ---
 
