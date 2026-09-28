@@ -41,20 +41,20 @@ param webAppSku string = 'B1'
 param deploymentOption string = 'NoAskCbx'
 
 // ---------------------------------------------------------------------------
-// Optional: collection from Purview and Power Platform
+// Collection from Purview and Power Platform (always deployed)
 // ---------------------------------------------------------------------------
-
-@description('Create the Automation account that runs the Purview and Power Platform collection runbooks, with the PowerShell modules they need.')
-param createAutomationAccount bool = true
 
 @description('Leave empty. The Deploy to Azure button then imports the runbooks from the runbooks folder next to this template. Only set it to use another copy: a public base URL ending in a slash. Loaded from a file, the template imports nothing and you import the two runbooks in Stage 2.')
 param runbookBaseUrl string = ''
 
-@description('Application (client) ID of the Purview collector app registration, if you created one in Stage 1. Can be set later under Settings.')
-param purviewCollectorAppId string = ''
+@description('Application (client) ID of the "CBX Purview Collector" app registration created in Stage 1 (step 1.3).')
+@minLength(36)
+@maxLength(36)
+param purviewCollectorAppId string
 
-@description('Your tenant\'s primary onmicrosoft.com domain, for example contoso.onmicrosoft.com. Needed by the Purview collector.')
-param purviewOrganization string = ''
+@description('Your tenant\'s primary onmicrosoft.com domain, for example contoso.onmicrosoft.com (Entra admin centre, Overview, Primary domain). Security & Compliance PowerShell accepts only this form.')
+@minLength(17)
+param purviewOrganization string
 
 param tags object = {
   workload: 'copilot-blueprint-explorer'
@@ -68,7 +68,7 @@ var automationName = '${namePrefix}-aa-${suffix}'
 // Set only when deployed from a URL (the button, --template-uri); a template loaded from a file has no link.
 var templateUri = deployment().properties.?templateLink.?uri ?? ''
 var runbookBase = !empty(runbookBaseUrl) ? runbookBaseUrl : (empty(templateUri) ? '' : uri(templateUri, 'runbooks/'))
-var importRunbooks = createAutomationAccount && !empty(runbookBase)
+var importRunbooks = !empty(runbookBase)
 
 // Built-in role definition IDs.
 var roles = {
@@ -137,8 +137,8 @@ resource site 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'Cbx__SecurityGroupObjectId', value: securityGroupObjectId }
         { name: 'Cbx__SubscriptionId', value: subscription().subscriptionId }
         { name: 'Cbx__DeploymentOption', value: deploymentOption }
-        { name: 'Cbx__AutomationResourceGroup', value: createAutomationAccount ? resourceGroup().name : '' }
-        { name: 'Cbx__AutomationAccountName', value: createAutomationAccount ? automationName : '' }
+        { name: 'Cbx__AutomationResourceGroup', value: resourceGroup().name }
+        { name: 'Cbx__AutomationAccountName', value: automationName }
         { name: 'Cbx__PurviewCollectorAppId', value: purviewCollectorAppId }
         { name: 'Cbx__PurviewOrganization', value: purviewOrganization }
       ]
@@ -146,7 +146,7 @@ resource site 'Microsoft.Web/sites@2024-11-01' = {
   }
 }
 
-resource automation 'Microsoft.Automation/automationAccounts@2023-11-01' = if (createAutomationAccount) {
+resource automation 'Microsoft.Automation/automationAccounts@2023-11-01' = {
   name: automationName
   location: location
   tags: tags
@@ -163,7 +163,7 @@ resource automation 'Microsoft.Automation/automationAccounts@2023-11-01' = if (c
 
 // One at a time: Automation imports that run in parallel are prone to stalling.
 @batchSize(1)
-resource automationModules 'Microsoft.Automation/automationAccounts/modules@2023-11-01' = [for m in modules: if (createAutomationAccount) {
+resource automationModules 'Microsoft.Automation/automationAccounts/modules@2023-11-01' = [for m in modules: {
   parent: automation
   name: m.name
   properties: {
@@ -190,7 +190,7 @@ resource automationRunbooks 'Microsoft.Automation/automationAccounts/runbooks@20
 }]
 
 // The console starts the runbooks and reads their output with the web app's own identity; nothing wider.
-resource jobOperator 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createAutomationAccount) {
+resource jobOperator 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(automation.id, site.id, roles.automationJobOperator)
   scope: automation
   properties: {
@@ -200,7 +200,7 @@ resource jobOperator 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (
   }
 }
 
-resource jobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createAutomationAccount) {
+resource jobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(automation.id, site.id, roles.reader)
   scope: automation
   properties: {
@@ -229,6 +229,6 @@ output managedIdentityName string = uami.name
 output managedIdentityClientId string = uami.properties.clientId
 output managedIdentityPrincipalId string = uami.properties.principalId
 output webAppSystemIdentityPrincipalId string = site.identity.principalId
-output automationAccountName string = createAutomationAccount ? automation.name : ''
-output automationAccountPrincipalId string = createAutomationAccount ? automation!.identity.principalId : ''
+output automationAccountName string = automation.name
+output automationAccountPrincipalId string = automation.identity.principalId
 output runbooksImportedFrom string = importRunbooks ? runbookBase : 'not imported: import the two runbooks in Stage 2 (2.4)'

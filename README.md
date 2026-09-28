@@ -7,7 +7,7 @@ Deployment takes **three stages**, all in the Azure and Entra portals. Azure Clo
 | Stage | Who | What | Where |
 |---|---|---|---|
 | **1** | Global Administrator, or an administrator with the minimum roles below | Creates the access group and the app registration, the resource group, and the Azure resources (one click, or by hand) | Entra admin centre and Azure portal, or Cloud Shell (a ready-made block per step) |
-| **2** | Deployer (Contributor on the resource group) | Uploads the application zip and configures the resources | Azure portal (Deployment Center), optionally Cloud Shell |
+| **2** | Deployer (Contributor on the resource group) | Uploads the application zip and configures the resources | Azure portal and its Cloud Shell |
 | **3** | Global Administrator | Signs in, grants the two basic permissions, tests with **No scan**, then grants the rest for a full scan | The console itself |
 
 ---
@@ -497,25 +497,45 @@ Send this to the deployer. It contains no secrets.
      ```powershell
      (Get-FileHash .\cbx-app.zip -Algorithm SHA256).Hash -eq (Get-Content .\cbx-app.zip.sha256).Split(' ')[0]
      ```
-   - **Cloud Shell (Bash)**: first use **Manage files → Upload** in the Cloud Shell toolbar to upload both files, then run the command below. It must print `cbx-app.zip: OK`:
-     ```bash
-     sha256sum -c cbx-app.zip.sha256
-     ```
+   - The Cloud Shell block in 2.2 checks it again before it deploys anything.
    - For extra assurance, ask your Microsoft contact to read out the checksum through a different channel from the one the files arrived by, and compare it with the file.
 
 > **Upload the zip exactly as downloaded.** Do not unzip and re-zip it. Some Windows zip tools write backslash paths, which Linux App Service cannot extract, and the upload then fails with an unhelpful "400".
 
 ### 2.2 Upload the application
 
-1. **Azure portal →** the web app **→ Deployment → Deployment Center.**
-2. On the **Settings** tab: Source **Publish files (new)** (under *Manual Deployment (Push)*).
-3. Select **`cbx-app.zip`** (the limit is 1 GB; this zip is about 28 MB), then **Save**.
-4. Wait for the deployment to show **Success** on the **Logs** tab. The app restarts itself.
+Upload with Cloud Shell, from the Azure portal's top bar. It uses the App Service publish API, which deploys a zip exactly as it is, with no build step.
 
-Cloud Shell alternative (from the folder in 2.1):
-```bash
-az webapp deploy --resource-group <resource-group> --name <web-app-name> --src-path cbx-app.zip --type zip
+> **Do not use Deployment Center → Publish files (new).** It runs a build step (Oryx) on the upload, and this zip is already built, so the deployment fails with *"Couldn't detect a version for the platform 'dotnet' in the repo"*. Kudu's own *Zip Push Deploy* page does not work for Linux apps either.
+
+1. Open **Cloud Shell** (`>_` in the portal's top bar) and choose **PowerShell**.
+2. **Manage files → Upload** both `cbx-app.zip` and `cbx-app.zip.sha256`. They land in your home folder.
+3. Paste this block, with your resource group:
+
+```powershell
+& {
+    $ResourceGroup = 'rg-copilot-blueprint'
+    $WebAppName    = ''        # empty: the only web app in the resource group
+    $ZipFolder     = $HOME     # where Manage files -> Upload put the two files
+
+    $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+    $zip = Join-Path $ZipFolder 'cbx-app.zip'
+    $expected = (Get-Content (Join-Path $ZipFolder 'cbx-app.zip.sha256')).Split(' ')[0]
+    if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $expected) { throw 'cbx-app.zip does not match cbx-app.zip.sha256. Do not deploy it; ask for the files again.' }
+    if (-not $WebAppName) { $WebAppName = az webapp list --resource-group $ResourceGroup --query "[0].name" -o tsv }
+    # The zip is already built: make sure App Service does not try to build it
+    az webapp config appsettings set --resource-group $ResourceGroup --name $WebAppName --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false -o none
+    az webapp deploy --resource-group $ResourceGroup --name $WebAppName --src-path $zip --type zip --clean true -o none
+    $url = 'https://' + (az webapp show --resource-group $ResourceGroup --name $WebAppName --query defaultHostName -o tsv)
+    foreach ($try in 1..12) {
+        try { $health = Invoke-RestMethod "$url/api/health" -TimeoutSec 20; break } catch { Start-Sleep -Seconds 10 }
+    }
+    "Deployed to:  $url"
+    "Health:       $(if ($health) { $health.status } else { 'not answering yet: check Monitoring -> Log stream' })"
+}
 ```
+
+It checks the zip against its checksum first, and refuses to deploy a file that doesn't match. It takes about two minutes, and ends by printing the app's address and `Health: healthy`.
 
 ### 2.3 Configure the web app
 
@@ -759,7 +779,26 @@ Work through **Settings → Roles & permissions** from top to bottom. Every row 
    - **Power Platform management app → Grant.** This needs Power Platform Administrator. If the row says so, first grant *PowerApps Service* under **App registration**.
    - On the **Agent estate** page, select **Collect from Power Platform**. This discovers your Dataverse environments.
    - Back on **Roles & permissions → Automation account**, select **Grant** on **CBX agent inventory reader** for each environment. This needs System Administrator in that environment. It reads only agents and AI Builder models, deliberately not transcripts.
-5. **AskCBX** (only with the `AskCbx` option): point it at your Azure AI Foundry project under **Settings → Configuration → AskCBX**.
+5. **AskCBX** (only with the `AskCbx` option): see 3.4a below.
+
+### 3.4a AskCBX, and governing it in Foundry
+
+Only with the `AskCbx` deployment option. Everything here is yours: the project, the model, the quota and the telemetry. Nothing is created for you, and no key is stored.
+
+1. **Point it at your project.** **Settings → Configuration → AskCBX**: switch it on, then enter the **project endpoint** (`https://<resource>.services.ai.azure.com/api/projects/<project>`) and the **model deployment name**. Save.
+2. **Grant the app identity.** Under **Roles & permissions**, give the web app's managed identity **Foundry User** on that project. Ask a question to confirm it answers.
+
+That is enough for a working assistant. The rest turns it into an agent you can govern.
+
+3. **Answer through an agent.** Create a **prompt agent** in the Foundry portal (any name; `cbx-agent` is the convention). Put that name in **Answer through a Foundry agent** and save. Every question now runs through the agent, which is what makes the project's **Traces**, **Monitor**, **Evaluation**, guardrails and red teaming apply to this traffic. The same agent can be published to Teams and Microsoft 365 Copilot from the portal.
+4. **Publish the definition.** Select **Publish the definition to this agent**. This writes the console's guardrail instructions, the model and its tools onto the agent as a new version. Until you do, the agent is empty and the instructions live only inside the application, where nobody can review them. Needs write access on the project — **Azure AI Project Manager**, or Foundry User plus agent write.
+5. **Ground answers in Microsoft Learn** (optional). Lets the assistant cite Microsoft's current documentation instead of answering from memory. Only the search terms the model chooses leave the project; nothing measured about your tenant is sent. With an agent named, this is applied when you publish rather than per request, because an agent owns its own tools.
+6. **Record conversations** (optional). Switch on **Record conversations in Foundry** and give the **name** of an Application Insights resource in this subscription. Foundry then records each question, tool call and answer server-side; without it the Traces and Monitor tabs stay empty.
+
+   The resource must be one you can actually read. An Application Insights behind **Private Link**, or in a subscription you lack access to, makes the portal's Traces tab fail with *"insufficient access"* even though recording is on. A workspace-backed resource with public query enabled, in the same resource group as the Foundry account, is the simple choice. The project's own managed identity needs **Monitoring Metrics Publisher** on it.
+
+   The connection is made as you, not by the app. Turning it on replaces any Application Insights connection already on the project; turning it off removes only the one this console made.
+
 
 ### 3.5 Run the full scan
 
@@ -815,6 +854,7 @@ Some grants live outside the resource group and are **not** removed when it is d
 | "You are not a member of the group" (`not_in_access_group`) | Add the person to the access group. Membership is re-checked every 15 minutes. |
 | Global Administrator refused at first sign-in or in recovery | The `wids` claim is missing (step 1.2.3). Without it, the console cannot see the Global Administrator role. |
 | Pages fail with a federated-identity or token-exchange error | The federated credential (1.5) must name the user-assigned identity **attached to the web app**, and `Cbx__UserAssignedClientId` must be that identity's **Client ID**. |
+| Deployment log says *"Couldn't detect a version for the platform 'dotnet' in the repo"* | The zip went through a build step. That happens with Deployment Center → Publish files (new). Deploy with the 2.2 Cloud Shell block instead. |
 | Upload fails with **400**, or the app shows "Application Error" | Upload the handed-over zip unchanged (2.1). Check that `SCM_DO_BUILD_DURING_DEPLOYMENT` is `false`, the stack is .NET 8 and the startup command is empty. **Monitoring → Log stream** shows the start-up error. |
 | **Collect from Purview** fails | Automation account → **Jobs →** the latest job → **Output / Errors**. Common causes: modules not yet *Available*; certificate not named `CbxPurviewCert`; the role groups in 3.4.3 are missing; or the `.cer` was not uploaded to the collector app registration. |
 | **Collect from Power Platform** reports the identity is not registered | Grant **Power Platform management app** (3.4.4). Changes can take a few minutes to reach Power Platform. |

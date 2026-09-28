@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "11191074762346780373"
+      "templateHash": "9081752131184040502"
     },
     "description": "Copilot Blueprint Explorer: the Azure resources, in one click. Entra objects (the access group and the app registration) are created by hand first; see README.md, Stage 1."
   },
@@ -80,13 +80,6 @@
         "description": "NoAskCbx: the full console. AskCbx: adds the optional AskCBX assistant against your own Foundry project. Minimal: no how-to-fix guidance."
       }
     },
-    "createAutomationAccount": {
-      "type": "bool",
-      "defaultValue": true,
-      "metadata": {
-        "description": "Create the Automation account that runs the Purview and Power Platform collection runbooks, with the PowerShell modules they need."
-      }
-    },
     "runbookBaseUrl": {
       "type": "string",
       "defaultValue": "",
@@ -96,16 +89,17 @@
     },
     "purviewCollectorAppId": {
       "type": "string",
-      "defaultValue": "",
+      "minLength": 36,
+      "maxLength": 36,
       "metadata": {
-        "description": "Application (client) ID of the Purview collector app registration, if you created one in Stage 1. Can be set later under Settings."
+        "description": "Application (client) ID of the \"CBX Purview Collector\" app registration created in Stage 1 (step 1.3)."
       }
     },
     "purviewOrganization": {
       "type": "string",
-      "defaultValue": "",
+      "minLength": 17,
       "metadata": {
-        "description": "Your tenant's primary onmicrosoft.com domain, for example contoso.onmicrosoft.com. Needed by the Purview collector."
+        "description": "Your tenant's primary onmicrosoft.com domain, for example contoso.onmicrosoft.com (Entra admin centre, Overview, Primary domain). Security & Compliance PowerShell accepts only this form."
       }
     },
     "tags": {
@@ -121,7 +115,7 @@
     "automationName": "[format('{0}-aa-{1}', parameters('namePrefix'), variables('suffix'))]",
     "templateUri": "[coalesce(tryGet(tryGet(deployment().properties, 'templateLink'), 'uri'), '')]",
     "runbookBase": "[if(not(empty(parameters('runbookBaseUrl'))), parameters('runbookBaseUrl'), if(empty(variables('templateUri')), '', uri(variables('templateUri'), 'runbooks/')))]",
-    "importRunbooks": "[and(parameters('createAutomationAccount'), not(empty(variables('runbookBase'))))]",
+    "importRunbooks": "[not(empty(variables('runbookBase')))]",
     "roles": {
       "contributor": "b24988ac-6180-42a0-ab88-20f7382dd24c",
       "reader": "acdd72a7-3385-48ef-bd42-f606fba81ae7",
@@ -222,11 +216,11 @@
             },
             {
               "name": "Cbx__AutomationResourceGroup",
-              "value": "[if(parameters('createAutomationAccount'), resourceGroup().name, '')]"
+              "value": "[resourceGroup().name]"
             },
             {
               "name": "Cbx__AutomationAccountName",
-              "value": "[if(parameters('createAutomationAccount'), variables('automationName'), '')]"
+              "value": "[variables('automationName')]"
             },
             {
               "name": "Cbx__PurviewCollectorAppId",
@@ -245,7 +239,6 @@
       ]
     },
     {
-      "condition": "[parameters('createAutomationAccount')]",
       "type": "Microsoft.Automation/automationAccounts",
       "apiVersion": "2023-11-01",
       "name": "[variables('automationName')]",
@@ -267,7 +260,6 @@
         "mode": "serial",
         "batchSize": 1
       },
-      "condition": "[parameters('createAutomationAccount')]",
       "type": "Microsoft.Automation/automationAccounts/modules",
       "apiVersion": "2023-11-01",
       "name": "[format('{0}/{1}', variables('automationName'), variables('modules')[copyIndex()].name)]",
@@ -304,7 +296,6 @@
       ]
     },
     {
-      "condition": "[parameters('createAutomationAccount')]",
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
       "scope": "[resourceId('Microsoft.Automation/automationAccounts', variables('automationName'))]",
@@ -320,7 +311,6 @@
       ]
     },
     {
-      "condition": "[parameters('createAutomationAccount')]",
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
       "scope": "[resourceId('Microsoft.Automation/automationAccounts', variables('automationName'))]",
@@ -374,11 +364,11 @@
     },
     "automationAccountName": {
       "type": "string",
-      "value": "[if(parameters('createAutomationAccount'), variables('automationName'), '')]"
+      "value": "[variables('automationName')]"
     },
     "automationAccountPrincipalId": {
       "type": "string",
-      "value": "[if(parameters('createAutomationAccount'), reference(resourceId('Microsoft.Automation/automationAccounts', variables('automationName')), '2023-11-01', 'full').identity.principalId, '')]"
+      "value": "[reference(resourceId('Microsoft.Automation/automationAccounts', variables('automationName')), '2023-11-01', 'full').identity.principalId]"
     },
     "runbooksImportedFrom": {
       "type": "string",
