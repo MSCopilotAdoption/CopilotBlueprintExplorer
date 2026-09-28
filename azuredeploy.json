@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9081752131184040502"
+      "templateHash": "4008936093881229856"
     },
     "description": "Copilot Blueprint Explorer: the Azure resources, in one click. Entra objects (the access group and the app registration) are created by hand first; see README.md, Stage 1."
   },
@@ -66,18 +66,6 @@
       ],
       "metadata": {
         "description": "App Service plan size. B1 is enough for one customer."
-      }
-    },
-    "deploymentOption": {
-      "type": "string",
-      "defaultValue": "NoAskCbx",
-      "allowedValues": [
-        "NoAskCbx",
-        "AskCbx",
-        "Minimal"
-      ],
-      "metadata": {
-        "description": "NoAskCbx: the full console. AskCbx: adds the optional AskCBX assistant against your own Foundry project. Minimal: no how-to-fix guidance."
       }
     },
     "runbookBaseUrl": {
@@ -212,7 +200,7 @@
             },
             {
               "name": "Cbx__DeploymentOption",
-              "value": "[parameters('deploymentOption')]"
+              "value": "AskCbx"
             },
             {
               "name": "Cbx__AutomationResourceGroup",

@@ -36,10 +36,6 @@ param webAppName string = ''
 @allowed(['B1', 'B2', 'P0v3', 'P1v3'])
 param webAppSku string = 'B1'
 
-@description('NoAskCbx: the full console. AskCbx: adds the optional AskCBX assistant against your own Foundry project. Minimal: no how-to-fix guidance.')
-@allowed(['NoAskCbx', 'AskCbx', 'Minimal'])
-param deploymentOption string = 'NoAskCbx'
-
 // ---------------------------------------------------------------------------
 // Collection from Purview and Power Platform (always deployed)
 // ---------------------------------------------------------------------------
@@ -136,7 +132,10 @@ resource site 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'Cbx__UserAssignedClientId', value: uami.properties.clientId }
         { name: 'Cbx__SecurityGroupObjectId', value: securityGroupObjectId }
         { name: 'Cbx__SubscriptionId', value: subscription().subscriptionId }
-        { name: 'Cbx__DeploymentOption', value: deploymentOption }
+        // Every deployment carries the assistant; whether it is switched on, and which Foundry
+        // project answers, is decided later in Settings. Asking at deploy time only produced
+        // deployments that could never enable it without an app-setting change.
+        { name: 'Cbx__DeploymentOption', value: 'AskCbx' }
         { name: 'Cbx__AutomationResourceGroup', value: resourceGroup().name }
         { name: 'Cbx__AutomationAccountName', value: automationName }
         { name: 'Cbx__PurviewCollectorAppId', value: purviewCollectorAppId }

@@ -59,7 +59,7 @@ Keep the **handover sheet** (step 1.7) open as you go. Stage 2 and Stage 3 need 
 
 ## Stage 1: Administrator, in the portals
 
-Every step except 1.4 also has a **Cloud Shell alternative**: one block of commands that does the whole step. To use it:
+Every step except 1.5 also has a **Cloud Shell alternative**: one block of commands that does the whole step. To use it:
 1. Open Cloud Shell from the `>_` icon in the Azure portal's top bar, and choose **PowerShell**.
 2. Edit the parameters at the top of the block. Leave `TenantId` and `SubscriptionId` empty to use the ones Cloud Shell is signed in to.
 3. Paste the whole block and press Enter.
@@ -118,7 +118,7 @@ One app registration serves both the browser sign-in and the API.
 1. **Entra admin centre → App registrations → New registration.**
    - Name: `Copilot Blueprint Explorer`
    - Supported account types: **Accounts in this organizational directory only (single tenant)**
-   - Redirect URI: leave empty for now (added in step 1.5).
+   - Redirect URI: leave empty for now (added in step 1.6).
    - **Register.** Copy the **Application (client) ID** and the **Directory (tenant) ID** onto the handover sheet.
 2. **Expose an API.**
    - Next to *Application ID URI*, select **Add** and accept the default `api://<client-id>`. **Save.**
@@ -254,173 +254,9 @@ One app registration serves both the browser sign-in and the API.
 
 </details>
 
-### 1.3 Create the resource group
+### 1.3 Create the Purview collector app registration
 
-1. **Azure portal → Resource groups → Create.** Choose the subscription, a name (for example `rg-copilot-blueprint`) and a region. **Review + create.**
-2. If someone else will run Stage 2 and you will **not** use the one-click template: open the resource group, then **Access control (IAM) → Add role assignment → Contributor →** select the deployer **→ Review + assign.** (The template can do this for you.)
-
-<details>
-<summary><strong>Cloud Shell alternative (PowerShell)</strong></summary>
-
-```powershell
-& {
-    # --- Parameters. Empty TenantId / SubscriptionId: the ones Cloud Shell is signed in to.
-    $TenantId       = ''
-    $SubscriptionId = ''
-    $ResourceGroup  = 'rg-copilot-blueprint'
-    $Location       = 'westeurope'   # any Azure region
-    $DeployerUpn    = ''             # the Stage 2 deployer, e.g. deployer@contoso.com. Leave empty if you run Stage 2 yourself,
-                                     # or if you will enter the deployer in the 1.4 template instead (doing both makes 1.4 fail).
-
-    # --- Commands
-    $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
-    if (-not $TenantId) { $TenantId = az account show --query tenantId -o tsv }
-    if ($TenantId -ne (az account show --query tenantId -o tsv)) { az login --tenant $TenantId --use-device-code -o none }
-    if (-not $SubscriptionId) { $SubscriptionId = az account show --query id -o tsv }
-    az account set --subscription $SubscriptionId
-
-    # An existing group is reused as it is: re-creating it would drop its tags
-    $rgId = if ((az group exists --name $ResourceGroup) -eq 'true') { az group show --name $ResourceGroup --query id -o tsv } else { az group create --name $ResourceGroup --location $Location --query id -o tsv }
-    if ($DeployerUpn) {
-        $deployerId = az ad user show --id $DeployerUpn --query id -o tsv
-        if (-not (az role assignment list --assignee $deployerId --role Contributor --scope $rgId --query "[0].id" -o tsv)) {
-            az role assignment create --assignee-object-id $deployerId --assignee-principal-type User --role Contributor --scope $rgId -o none
-        }
-    }
-
-    "Tenant ID:       $TenantId"
-    "Subscription ID: $SubscriptionId"
-    "Resource group:  $ResourceGroup ($Location)"
-}
-```
-
-</details>
-
-### 1.4 Create the Azure resources
-
-Choose **one** of the two options.
-
-#### Option A: one click (recommended)
-
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMSCopilotAdoption%2FCopilotBlueprintExplorer%2Fmain%2Fazuredeploy.json)
-
-> The button needs this repository to be **publicly readable**, because the Azure portal fetches the template anonymously. If the button reports that it cannot download the template, use the file instead. Download `azuredeploy.json` from this repository, then in the portal search **Deploy a custom template → Build your own template in the editor → Load file**, select it and **Save**. The form that follows is the same, but the runbooks are then not imported automatically (2.4 covers them).
-
-Select the resource group from 1.3, then fill in:
-
-| Parameter | Value |
-|---|---|
-| **Api Client Id** | Application (client) ID from 1.2. Required. |
-| **Security Group Object Id** | Object ID from 1.1. (If left empty, only Global Administrators can sign in until a group is set under Settings → Users.) |
-| **Deployer Object Id** | The deployer's Object ID (**Entra → Users →** the person **→ Object ID**). They get Contributor on this resource group only. Leave empty if you run Stage 2 yourself. |
-| Name Prefix | `cbx` (default). Lowercase letters and digits, 2–6 characters. |
-| Web App Name | Leave empty to generate a unique one, or choose a globally unique name. It becomes `https://<name>.azurewebsites.net`. |
-| Web App Sku | `B1` is enough. |
-| Deployment Option | `NoAskCbx` (the full console). `AskCbx` adds the optional assistant, which needs your own Azure AI Foundry project. `Minimal` hides how-to-fix guidance. |
-| Create Automation Account | `true` if you want the Purview and Power Platform collection. Without it, those checks remain manual answers. |
-| Runbook Base Url | **Leave empty.** Through the button, the two runbooks are imported automatically from the `runbooks` folder next to the template. Set it only to use a different copy. |
-| Purview Collector App Id | From step 1.6, if you create it now. Can be set later in Settings. |
-| Purview Organization | Your primary `onmicrosoft.com` domain, for example `contoso.onmicrosoft.com`. |
-
-**Review + create → Create.** It takes about five to ten minutes, most of it importing two PowerShell modules into the Automation account. The third module, MicrosoftTeams, is left to Stage 2 (2.4), so a slow import cannot hold up the deployment.
-
-When it finishes, open **Outputs** and copy every value onto the handover sheet. `runbooksImportedFrom` shows whether the runbooks were imported, or need importing in 2.4.
-
-<details>
-<summary><strong>Option B: create the resources by hand</strong> (expand)</summary>
-
-Stage 2 finishes the configuration. Here you only create the resources.
-
-1. **User-assigned managed identity:** **Create a resource → User Assigned Managed Identity →** your resource group, name for example `cbx-uami` **→ Create.** Copy its **Client ID** and **Object (principal) ID**.
-2. **Web app:** **Create a resource → Web App.**
-   - Publish **Code**, Runtime stack **.NET 8 (LTS)**, Operating system **Linux**, your region.
-   - Pricing plan: create a new Linux plan, **Basic B1**.
-   - **Review + create → Create.** Copy the web app name and URL.
-3. **Web app identity:** open the web app → **Identity → System assigned → On → Save.**
-4. **Automation account:** **Create a resource → Automation →** your resource group, name for example `cbx-aa` **→** leave the system-assigned identity **on → Create.** Everything this console reads outside Microsoft Graph is collected here, so a deployment without it leaves the Purview, Exchange, Teams, SharePoint and Power Platform checks as manual answers.
-5. **Role assignments** (you need Owner or User Access Administrator): open the Automation account → **Access control (IAM) → Add role assignment:**
-   - **Automation Job Operator** → Assign access to **Managed identity** → **App Service** → the web app → **Review + assign.**
-   - Repeat for **Reader**.
-
-   *(Alternatively, grant both later from the console, under Settings → Roles & permissions → Managed identity, in Stage 3.)*
-6. Make the deployer **Contributor** on the resource group (step 1.3.2).
-
-</details>
-
-### 1.5 Finish the app registration
-
-Both of these need the web app and the user-assigned identity, which now exist.
-
-1. **Browser redirect URI:** **App registrations → Copilot Blueprint Explorer → Authentication → Add a platform → Single-page application.**
-   - Redirect URI: `https://<web-app-name>.azurewebsites.net` exactly: `https`, no trailing slash, no path.
-   - Leave both implicit-grant boxes **unticked**. **Configure.**
-2. **Federated credential** (lets the API act for the signed-in person without a secret): **Certificates & secrets → Federated credentials → Add credential.**
-   - Federated credential scenario: **Managed identity**.
-   - Select managed identity: your subscription, type **User-assigned managed identity**, and the one created in 1.4 (`cbx-uami-…`).
-   - Name: `cbx-uami-fic`. Leave the audience as `api://AzureADTokenExchange`. **Add.**
-
-   *If your portal does not offer the Managed identity scenario, choose **Other issuer** and enter:*
-   - *Issuer: `https://login.microsoftonline.com/<tenant-id>/v2.0`*
-   - *Subject identifier: the user-assigned identity's **Object (principal) ID***
-   - *Audience: `api://AzureADTokenExchange`*
-
-<details>
-<summary><strong>Cloud Shell alternative (PowerShell)</strong>: redirect URI and federated credential</summary>
-
-```powershell
-& {
-    # --- Parameters. Empty TenantId / SubscriptionId: the ones Cloud Shell is signed in to.
-    $TenantId       = ''
-    $SubscriptionId = ''
-    $ResourceGroup  = 'rg-copilot-blueprint'
-    $AppName        = 'Copilot Blueprint Explorer'
-    $WebAppName     = ''   # empty: the only web app in the resource group
-    $IdentityName   = ''   # empty: the only user-assigned identity in the resource group
-
-    # --- Commands
-    $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
-    if (-not $TenantId) { $TenantId = az account show --query tenantId -o tsv }
-    if ($TenantId -ne (az account show --query tenantId -o tsv)) { az login --tenant $TenantId --use-device-code -o none }
-    if (-not $SubscriptionId) { $SubscriptionId = az account show --query id -o tsv }
-    az account set --subscription $SubscriptionId
-    function Invoke-Rest([string]$Method, [string]$Url, $Body) {
-        $file = Join-Path ([IO.Path]::GetTempPath()) "cbx-$([guid]::NewGuid()).json"
-        $Body | ConvertTo-Json -Depth 10 | Set-Content -Path $file -Encoding utf8NoBOM
-        try { az rest --method $Method --url $Url --headers 'Content-Type=application/json' --body "@$file" -o none } finally { Remove-Item $file }
-    }
-
-    if (-not $WebAppName)   { $WebAppName   = az webapp list --resource-group $ResourceGroup --query "[0].name" -o tsv }
-    if (-not $IdentityName) { $IdentityName = az identity list --resource-group $ResourceGroup --query "[0].name" -o tsv }
-    if (-not $WebAppName -or -not $IdentityName) { throw "No web app or user-assigned identity in '$ResourceGroup'. Complete 1.4 first." }
-    $url       = 'https://' + (az webapp show --resource-group $ResourceGroup --name $WebAppName --query defaultHostName -o tsv)
-    $principal = az identity show --resource-group $ResourceGroup --name $IdentityName --query principalId -o tsv
-    $app = az ad app list --filter "displayName eq '$AppName'" --query "[0].[appId,id]" -o tsv
-    if (-not $app) { throw "App registration '$AppName' not found. Run 1.2 first." }
-    $appId, $appObjectId = @($app) -split "`t"
-
-    # Browser redirect URI (single-page application), added to any already registered
-    $redirects = @(@(az ad app show --id $appId --query spa.redirectUris -o json | ConvertFrom-Json) + $url | Where-Object { $_ } | Select-Object -Unique)
-    Invoke-Rest PATCH "https://graph.microsoft.com/v1.0/applications/$appObjectId" @{ spa = @{ redirectUris = $redirects } }
-
-    # Federated credential: the user-assigned identity stands in for a client secret
-    $file = Join-Path ([IO.Path]::GetTempPath()) 'cbx-fic.json'
-    @{ name = 'cbx-uami-fic'; issuer = "https://login.microsoftonline.com/$TenantId/v2.0"; subject = $principal; audiences = @('api://AzureADTokenExchange') } |
-        ConvertTo-Json | Set-Content -Path $file -Encoding utf8NoBOM
-    $ficId = az ad app federated-credential list --id $appId --query "[?name=='cbx-uami-fic'].id" -o tsv
-    try {
-        if ($ficId) { az ad app federated-credential update --id $appId --federated-credential-id $ficId --parameters "@$file" -o none } else { az ad app federated-credential create --id $appId --parameters "@$file" -o none }
-    } finally { Remove-Item $file }
-
-    "Redirect URI:          $url"
-    "Federated credential:  cbx-uami-fic -> $IdentityName (principal $principal)"
-}
-```
-
-</details>
-
-### 1.6 Optional: the Purview collector app registration
-
-Needed only if you created the Automation account and want Purview, Exchange Online, Teams and SharePoint settings collected automatically. Microsoft exposes no Graph API for DLP policies. Security & Compliance PowerShell accepts only certificate-based app-only sign-in, so the collector needs its own app registration and certificate.
+The collector reads what Microsoft Graph does not expose: DLP policies, retention, labels, Exchange Online and Teams settings, and the SharePoint Advanced Management readings behind the Oversharing controls. Security & Compliance PowerShell accepts only certificate-based app-only sign-in, so it needs its own app registration and certificate. **Create it now** &mdash; the deployment in 1.5 asks for its Application (client) ID.
 
 1. **App registrations → New registration.** Name `CBX Purview Collector`, **single tenant**, no redirect URI. **Register.**
 2. Copy its **Application (client) ID** onto the handover sheet. Also open **Enterprise applications → CBX Purview Collector** and copy its **Object ID**. This is the service principal's ID, which Stage 3 needs; it is **not** the app registration's object ID.
@@ -466,6 +302,168 @@ Add no permissions here. The console grants them in Stage 3 and shows why each o
 
 </details>
 
+### 1.4 Create the resource group
+
+1. **Azure portal → Resource groups → Create.** Choose the subscription, a name (for example `rg-copilot-blueprint`) and a region. **Review + create.**
+2. If someone else will run Stage 2 and you will **not** use the one-click template: open the resource group, then **Access control (IAM) → Add role assignment → Contributor →** select the deployer **→ Review + assign.** (The template can do this for you.)
+
+<details>
+<summary><strong>Cloud Shell alternative (PowerShell)</strong></summary>
+
+```powershell
+& {
+    # --- Parameters. Empty TenantId / SubscriptionId: the ones Cloud Shell is signed in to.
+    $TenantId       = ''
+    $SubscriptionId = ''
+    $ResourceGroup  = 'rg-copilot-blueprint'
+    $Location       = 'westeurope'   # any Azure region
+    $DeployerUpn    = ''             # the Stage 2 deployer, e.g. deployer@contoso.com. Leave empty if you run Stage 2 yourself,
+                                     # or if you will enter the deployer in the 1.5 template instead (doing both makes 1.5 fail).
+
+    # --- Commands
+    $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+    if (-not $TenantId) { $TenantId = az account show --query tenantId -o tsv }
+    if ($TenantId -ne (az account show --query tenantId -o tsv)) { az login --tenant $TenantId --use-device-code -o none }
+    if (-not $SubscriptionId) { $SubscriptionId = az account show --query id -o tsv }
+    az account set --subscription $SubscriptionId
+
+    # An existing group is reused as it is: re-creating it would drop its tags
+    $rgId = if ((az group exists --name $ResourceGroup) -eq 'true') { az group show --name $ResourceGroup --query id -o tsv } else { az group create --name $ResourceGroup --location $Location --query id -o tsv }
+    if ($DeployerUpn) {
+        $deployerId = az ad user show --id $DeployerUpn --query id -o tsv
+        if (-not (az role assignment list --assignee $deployerId --role Contributor --scope $rgId --query "[0].id" -o tsv)) {
+            az role assignment create --assignee-object-id $deployerId --assignee-principal-type User --role Contributor --scope $rgId -o none
+        }
+    }
+
+    "Tenant ID:       $TenantId"
+    "Subscription ID: $SubscriptionId"
+    "Resource group:  $ResourceGroup ($Location)"
+}
+```
+
+</details>
+
+### 1.5 Create the Azure resources
+
+Choose **one** of the two options.
+
+#### Option A: one click (recommended)
+
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMSCopilotAdoption%2FCopilotBlueprintExplorer%2Fmain%2Fazuredeploy.json)
+
+> The button needs this repository to be **publicly readable**, because the Azure portal fetches the template anonymously. If the button reports that it cannot download the template, use the file instead. Download `azuredeploy.json` from this repository, then in the portal search **Deploy a custom template → Build your own template in the editor → Load file**, select it and **Save**. The form that follows is the same, but the runbooks are then not imported automatically (2.4 covers them).
+
+Select the resource group from 1.4, then fill in:
+
+| Parameter | Value |
+|---|---|
+| **Api Client Id** | Application (client) ID from 1.2. Required. |
+| **Security Group Object Id** | Object ID from 1.1. (If left empty, only Global Administrators can sign in until a group is set under Settings → Users.) |
+| **Deployer Object Id** | The deployer's Object ID (**Entra → Users →** the person **→ Object ID**). They get Contributor on this resource group only. Leave empty if you run Stage 2 yourself. |
+| Name Prefix | `cbx` (default). Lowercase letters and digits, 2–6 characters. |
+| Web App Name | Leave empty to generate a unique one, or choose a globally unique name. It becomes `https://<name>.azurewebsites.net`. |
+| Web App Sku | `B1` is enough. |
+| Runbook Base Url | **Leave empty.** Through the button, the two runbooks are imported automatically from the `runbooks` folder next to the template. Set it only to use a different copy. |
+| **Purview Collector App Id** | Application (client) ID from step 1.3. Required. |
+| **Purview Organization** | Your primary `onmicrosoft.com` domain, for example `contoso.onmicrosoft.com`. Required. |
+
+**Review + create → Create.** It takes about five to ten minutes, most of it importing two PowerShell modules into the Automation account. The third module, MicrosoftTeams, is left to Stage 2 (2.4), so a slow import cannot hold up the deployment.
+
+When it finishes, open **Outputs** and copy every value onto the handover sheet. `runbooksImportedFrom` shows whether the runbooks were imported, or need importing in 2.4.
+
+<details>
+<summary><strong>Option B: create the resources by hand</strong> (expand)</summary>
+
+Stage 2 finishes the configuration. Here you only create the resources.
+
+1. **User-assigned managed identity:** **Create a resource → User Assigned Managed Identity →** your resource group, name for example `cbx-uami` **→ Create.** Copy its **Client ID** and **Object (principal) ID**.
+2. **Web app:** **Create a resource → Web App.**
+   - Publish **Code**, Runtime stack **.NET 8 (LTS)**, Operating system **Linux**, your region.
+   - Pricing plan: create a new Linux plan, **Basic B1**.
+   - **Review + create → Create.** Copy the web app name and URL.
+3. **Web app identity:** open the web app → **Identity → System assigned → On → Save.**
+4. **Automation account:** **Create a resource → Automation →** your resource group, name for example `cbx-aa` **→** leave the system-assigned identity **on → Create.** Everything this console reads outside Microsoft Graph is collected here, so a deployment without it leaves the Purview, Exchange, Teams, SharePoint and Power Platform checks as manual answers.
+5. **Role assignments** (you need Owner or User Access Administrator): open the Automation account → **Access control (IAM) → Add role assignment:**
+   - **Automation Job Operator** → Assign access to **Managed identity** → **App Service** → the web app → **Review + assign.**
+   - Repeat for **Reader**.
+
+   *(Alternatively, grant both later from the console, under Settings → Roles & permissions → Managed identity, in Stage 3.)*
+6. Make the deployer **Contributor** on the resource group (step 1.4.2).
+
+</details>
+
+### 1.6 Finish the app registration
+
+Both of these need the web app and the user-assigned identity, which now exist.
+
+1. **Browser redirect URI:** **App registrations → Copilot Blueprint Explorer → Authentication → Add a platform → Single-page application.**
+   - Redirect URI: `https://<web-app-name>.azurewebsites.net` exactly: `https`, no trailing slash, no path.
+   - Leave both implicit-grant boxes **unticked**. **Configure.**
+2. **Federated credential** (lets the API act for the signed-in person without a secret): **Certificates & secrets → Federated credentials → Add credential.**
+   - Federated credential scenario: **Managed identity**.
+   - Select managed identity: your subscription, type **User-assigned managed identity**, and the one created in 1.5 (`cbx-uami-…`).
+   - Name: `cbx-uami-fic`. Leave the audience as `api://AzureADTokenExchange`. **Add.**
+
+   *If your portal does not offer the Managed identity scenario, choose **Other issuer** and enter:*
+   - *Issuer: `https://login.microsoftonline.com/<tenant-id>/v2.0`*
+   - *Subject identifier: the user-assigned identity's **Object (principal) ID***
+   - *Audience: `api://AzureADTokenExchange`*
+
+<details>
+<summary><strong>Cloud Shell alternative (PowerShell)</strong>: redirect URI and federated credential</summary>
+
+```powershell
+& {
+    # --- Parameters. Empty TenantId / SubscriptionId: the ones Cloud Shell is signed in to.
+    $TenantId       = ''
+    $SubscriptionId = ''
+    $ResourceGroup  = 'rg-copilot-blueprint'
+    $AppName        = 'Copilot Blueprint Explorer'
+    $WebAppName     = ''   # empty: the only web app in the resource group
+    $IdentityName   = ''   # empty: the only user-assigned identity in the resource group
+
+    # --- Commands
+    $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+    if (-not $TenantId) { $TenantId = az account show --query tenantId -o tsv }
+    if ($TenantId -ne (az account show --query tenantId -o tsv)) { az login --tenant $TenantId --use-device-code -o none }
+    if (-not $SubscriptionId) { $SubscriptionId = az account show --query id -o tsv }
+    az account set --subscription $SubscriptionId
+    function Invoke-Rest([string]$Method, [string]$Url, $Body) {
+        $file = Join-Path ([IO.Path]::GetTempPath()) "cbx-$([guid]::NewGuid()).json"
+        $Body | ConvertTo-Json -Depth 10 | Set-Content -Path $file -Encoding utf8NoBOM
+        try { az rest --method $Method --url $Url --headers 'Content-Type=application/json' --body "@$file" -o none } finally { Remove-Item $file }
+    }
+
+    if (-not $WebAppName)   { $WebAppName   = az webapp list --resource-group $ResourceGroup --query "[0].name" -o tsv }
+    if (-not $IdentityName) { $IdentityName = az identity list --resource-group $ResourceGroup --query "[0].name" -o tsv }
+    if (-not $WebAppName -or -not $IdentityName) { throw "No web app or user-assigned identity in '$ResourceGroup'. Complete 1.5 first." }
+    $url       = 'https://' + (az webapp show --resource-group $ResourceGroup --name $WebAppName --query defaultHostName -o tsv)
+    $principal = az identity show --resource-group $ResourceGroup --name $IdentityName --query principalId -o tsv
+    $app = az ad app list --filter "displayName eq '$AppName'" --query "[0].[appId,id]" -o tsv
+    if (-not $app) { throw "App registration '$AppName' not found. Run 1.2 first." }
+    $appId, $appObjectId = @($app) -split "`t"
+
+    # Browser redirect URI (single-page application), added to any already registered
+    $redirects = @(@(az ad app show --id $appId --query spa.redirectUris -o json | ConvertFrom-Json) + $url | Where-Object { $_ } | Select-Object -Unique)
+    Invoke-Rest PATCH "https://graph.microsoft.com/v1.0/applications/$appObjectId" @{ spa = @{ redirectUris = $redirects } }
+
+    # Federated credential: the user-assigned identity stands in for a client secret
+    $file = Join-Path ([IO.Path]::GetTempPath()) 'cbx-fic.json'
+    @{ name = 'cbx-uami-fic'; issuer = "https://login.microsoftonline.com/$TenantId/v2.0"; subject = $principal; audiences = @('api://AzureADTokenExchange') } |
+        ConvertTo-Json | Set-Content -Path $file -Encoding utf8NoBOM
+    $ficId = az ad app federated-credential list --id $appId --query "[?name=='cbx-uami-fic'].id" -o tsv
+    try {
+        if ($ficId) { az ad app federated-credential update --id $appId --federated-credential-id $ficId --parameters "@$file" -o none } else { az ad app federated-credential create --id $appId --parameters "@$file" -o none }
+    } finally { Remove-Item $file }
+
+    "Redirect URI:          $url"
+    "Federated credential:  cbx-uami-fic -> $IdentityName (principal $principal)"
+}
+```
+
+</details>
+
 ### 1.7 Handover sheet
 
 Send this to the deployer. It contains no secrets.
@@ -483,7 +481,7 @@ Send this to the deployer. It contains no secrets.
 | Purview collector: Application (client) ID | |
 | Purview collector: enterprise app Object ID | |
 | Tenant organisation (`….onmicrosoft.com`) | |
-| Option used in 1.4 (A or B), and the `runbooksImportedFrom` output | |
+| Option used in 1.5 (A or B), and the `runbooksImportedFrom` output | |
 
 ---
 
@@ -552,15 +550,15 @@ If you used **Option A**, everything below is already set. **Check it and move o
    | `Cbx__UserAssignedClientId` | The user-assigned identity's **Client ID** (not its principal ID) |
    | `Cbx__SecurityGroupObjectId` | Access group Object ID |
    | `Cbx__SubscriptionId` | Subscription ID |
-   | `Cbx__DeploymentOption` | `NoAskCbx`, `AskCbx` or `Minimal` |
+   | `Cbx__DeploymentOption` | `AskCbx` (every deployment carries the assistant; it stays switched off until Settings turns it on). `Minimal` additionally hides how-to-fix guidance. |
    | `Cbx__AutomationResourceGroup` | Resource group of the Automation account |
    | `Cbx__AutomationAccountName` | Automation account name |
-   | `Cbx__PurviewCollectorAppId` | Collector client ID (optional; can be set later in Settings) |
-   | `Cbx__PurviewOrganization` | `contoso.onmicrosoft.com` (optional; can be set later in Settings) |
+   | `Cbx__PurviewCollectorAppId` | Collector client ID, from 1.3 |
+   | `Cbx__PurviewOrganization` | `contoso.onmicrosoft.com` |
 
    > **Do not add `AZURE_CLIENT_ID`.** The console deliberately does every app-only read with the web app's **system-assigned** identity. `AZURE_CLIENT_ID` would silently switch it to the user-assigned identity, which holds no permissions.
 2. **Option B only:**
-   - **Identity → User assigned → Add →** the identity from 1.4 **→ Add.**
+   - **Identity → User assigned → Add →** the identity from 1.5 **→ Add.**
    - **Configuration → General settings:** Stack **.NET 8**, Startup command **empty**, **Always on: On**, HTTP version **2.0**, **FTP state: Disabled**, **HTTPS Only: On**, **Minimum inbound TLS version: 1.2**. **Save.**
    - **Monitoring → Health check → Enable**, path `/api/health`. **Save.**
 3. **Check that it runs.** Open both addresses in a browser:
@@ -593,7 +591,7 @@ Skip this if no Automation account was created.
    - Runbook type **PowerShell**, Runtime version **5.1**. The name must stay exactly `Get-CbxDlpPolicies`. **Import.**
    - Open it **→ Publish → Yes.**
    - Repeat for `Get-CbxPowerPlatform.ps1`.
-3. **Collector certificate** (only if you created the collector in 1.6). Create it in **Cloud Shell (Bash)**:
+3. **Collector certificate** — for the app registration created in 1.3. Create it in **Cloud Shell (Bash)**:
    ```bash
    openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes -keyout cbx.key -out CbxPurviewCert.cer -subj "/CN=CbxPurviewCert"
    openssl pkcs12 -export -inkey cbx.key -in CbxPurviewCert.cer -out CbxPurviewCert.pfx -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
@@ -626,7 +624,7 @@ The private key is created in Cloud Shell's temporary folder and deleted when th
     $AutomationAccount = ''       # empty: the only Automation account in the resource group
     $RunbookFolder     = $HOME    # holds the two runbook files (Manage files -> Upload puts them here)
     $RunbookBaseUrl    = ''       # or download them instead: https://raw.githubusercontent.com/MSCopilotAdoption/CopilotBlueprintExplorer/main/runbooks/
-    $CollectorAppId    = ''       # collector client ID from 1.6. Empty: skip the certificate
+    $CollectorAppId    = ''       # collector client ID from 1.3. Empty: skip the certificate
     $RenewCertificate  = $false   # $true: replace an existing CbxPurviewCert (renewal)
     $CertificateDays   = 365
 
@@ -755,7 +753,7 @@ Work through **Settings → Roles & permissions** from top to bottom. Every row 
      ```powershell
      & {
          $AdminUpn       = 'admin@contoso.com'       # you
-         $CollectorName  = 'CBX Purview Collector'   # as created in 1.6
+         $CollectorName  = 'CBX Purview Collector'   # as created in 1.3
          $CollectorAppId = ''                        # empty: looked up by name
 
          Connect-IPPSSession -UserPrincipalName $AdminUpn   # in Cloud Shell, add -Device if no sign-in window opens
@@ -779,7 +777,7 @@ Work through **Settings → Roles & permissions** from top to bottom. Every row 
    - **Power Platform management app → Grant.** This needs Power Platform Administrator. If the row says so, first grant *PowerApps Service* under **App registration**.
    - On the **Agent estate** page, select **Collect from Power Platform**. This discovers your Dataverse environments.
    - Back on **Roles & permissions → Automation account**, select **Grant** on **CBX agent inventory reader** for each environment. This needs System Administrator in that environment. It reads only agents and AI Builder models, deliberately not transcripts.
-5. **AskCBX** (only with the `AskCbx` option): see 3.4a below.
+5. **AskCBX**: optional, and configured here rather than at deployment. See 3.4a below.
 
 ### 3.4a AskCBX, and governing it in Foundry
 
@@ -847,13 +845,13 @@ Some grants live outside the resource group and are **not** removed when it is d
 | Symptom | Cause and fix |
 |---|---|
 | **AADSTS50105** at sign-in | The person is not assigned to the enterprise application. Add them to the access group (group assignment needs Entra ID P1), or assign them directly. |
-| **AADSTS50011** redirect URI mismatch | The SPA redirect URI in step 1.5 is missing or different. It must be exactly `https://<web-app-name>.azurewebsites.net` under **Single-page application** (not *Web*). |
+| **AADSTS50011** redirect URI mismatch | The SPA redirect URI in step 1.6 is missing or different. It must be exactly `https://<web-app-name>.azurewebsites.net` under **Single-page application** (not *Web*). |
 | **AADSTS65001** or "Need admin approval" | Admin consent from step 1.2.4 is missing, or `access_as_user` was not added under **My APIs**. |
 | "This application has not been configured yet" (`setup_in_progress`) | No access group is set, and the person is not a Global Administrator. Set the group ID at deployment, or under **Settings → Users**. |
 | "Access cannot be checked" (`access_gate_unavailable`) | The two basic permissions are missing, or were granted but the web app has not been restarted since (3.2). Or use named people. |
 | "You are not a member of the group" (`not_in_access_group`) | Add the person to the access group. Membership is re-checked every 15 minutes. |
 | Global Administrator refused at first sign-in or in recovery | The `wids` claim is missing (step 1.2.3). Without it, the console cannot see the Global Administrator role. |
-| Pages fail with a federated-identity or token-exchange error | The federated credential (1.5) must name the user-assigned identity **attached to the web app**, and `Cbx__UserAssignedClientId` must be that identity's **Client ID**. |
+| Pages fail with a federated-identity or token-exchange error | The federated credential (1.6) must name the user-assigned identity **attached to the web app**, and `Cbx__UserAssignedClientId` must be that identity's **Client ID**. |
 | Deployment log says *"Couldn't detect a version for the platform 'dotnet' in the repo"* | The zip went through a build step. That happens with Deployment Center → Publish files (new). Deploy with the 2.2 Cloud Shell block instead. |
 | Upload fails with **400**, or the app shows "Application Error" | Upload the handed-over zip unchanged (2.1). Check that `SCM_DO_BUILD_DURING_DEPLOYMENT` is `false`, the stack is .NET 8 and the startup command is empty. **Monitoring → Log stream** shows the start-up error. |
 | **Collect from Purview** fails | Automation account → **Jobs →** the latest job → **Output / Errors**. Common causes: modules not yet *Available*; certificate not named `CbxPurviewCert`; the role groups in 3.4.3 are missing; or the `.cer` was not uploaded to the collector app registration. |
@@ -869,7 +867,7 @@ Some grants live outside the resource group and are **not** removed when it is d
    ```bash
    az bicep build --file main.bicep --outfile azuredeploy.json
    ```
-4. **Moving the kit to another repository** (it must be public for the button to work): push these files there, then change the one repository-specific line in this README, the **Deploy to Azure** link in 1.4. The link is the raw address of `azuredeploy.json`, URL-encoded:
+4. **Moving the kit to another repository** (it must be public for the button to work): push these files there, then change the one repository-specific line in this README, the **Deploy to Azure** link in 1.5. The link is the raw address of `azuredeploy.json`, URL-encoded:
    `https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2F<owner>%2F<repo>%2Fmain%2Fazuredeploy.json`
 
    Nothing else names the repository. The template finds the runbooks next to itself, wherever it is fetched from.
