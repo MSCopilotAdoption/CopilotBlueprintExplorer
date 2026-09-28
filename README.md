@@ -31,7 +31,7 @@ Deployment takes **three stages**, all in the Azure and Entra portals. Azure Clo
 | Web app (.NET 8, Linux) | The console and its API. HTTPS only, TLS 1.2, FTP disabled, Always On, health check on `/api/health`. |
 | Web app **system-assigned** managed identity | Every app-only read of Microsoft Graph and Azure. Starts and reads the collection runbooks. |
 | **User-assigned** managed identity | Nothing but the federated credential that lets the API act for the signed-in person without a client secret. |
-| Automation account (Basic) *(optional)* | Runs the two collection runbooks. Holds the Purview collector's certificate. Its own identity reads Power Platform. The template imports two PowerShell modules into it; the third (MicrosoftTeams) is imported in Stage 2. |
+| Automation account (Basic) | Runs the two collection runbooks. Holds the Purview collector's certificate. Its own identity reads Power Platform. The template imports two PowerShell modules into it; the third (MicrosoftTeams) is imported in Stage 2. |
 
 Two Azure role assignments are made, and nothing wider: the web app's identity gets **Automation Job Operator** and **Reader** on the Automation account. If a deployer is named, they get **Contributor** on the resource group.
 
@@ -337,7 +337,7 @@ Stage 2 finishes the configuration. Here you only create the resources.
    - Pricing plan: create a new Linux plan, **Basic B1**.
    - **Review + create → Create.** Copy the web app name and URL.
 3. **Web app identity:** open the web app → **Identity → System assigned → On → Save.**
-4. **Automation account** (optional): **Create a resource → Automation →** your resource group, name for example `cbx-aa` **→** leave the system-assigned identity **on → Create.**
+4. **Automation account:** **Create a resource → Automation →** your resource group, name for example `cbx-aa` **→** leave the system-assigned identity **on → Create.** Everything this console reads outside Microsoft Graph is collected here, so a deployment without it leaves the Purview, Exchange, Teams, SharePoint and Power Platform checks as manual answers.
 5. **Role assignments** (you need Owner or User Access Administrator): open the Automation account → **Access control (IAM) → Add role assignment:**
    - **Automation Job Operator** → Assign access to **Managed identity** → **App Service** → the web app → **Review + assign.**
    - Repeat for **Reader**.
@@ -783,21 +783,21 @@ Work through **Settings → Roles & permissions** from top to bottom. Every row 
 
 ### 3.4a AskCBX, and governing it in Foundry
 
-Only with the `AskCbx` deployment option. Everything here is yours: the project, the model, the quota and the telemetry. Nothing is created for you, and no key is stored.
+**Entirely optional, and nothing here is created by the deployment.** The template creates one App Service and one Automation account, and no more. The Foundry project, the model deployment and — if you want conversation recording — the Application Insights resource are all **yours to provide**, existing or new, in whatever subscription and resource group your standards say. The console only points at what you give it. Skip this section and the rest of the console works exactly the same.
 
 1. **Point it at your project.** **Settings → Configuration → AskCBX**: switch it on, then enter the **project endpoint** (`https://<resource>.services.ai.azure.com/api/projects/<project>`) and the **model deployment name**. Save.
 2. **Grant the app identity.** Under **Roles & permissions**, give the web app's managed identity **Foundry User** on that project. Ask a question to confirm it answers.
 
-That is enough for a working assistant. The rest turns it into an agent you can govern.
+That is enough for a working assistant. The rest turns it into an agent you can govern, and each step is optional on its own.
 
 3. **Answer through an agent.** Create a **prompt agent** in the Foundry portal (any name; `cbx-agent` is the convention). Put that name in **Answer through a Foundry agent** and save. Every question now runs through the agent, which is what makes the project's **Traces**, **Monitor**, **Evaluation**, guardrails and red teaming apply to this traffic. The same agent can be published to Teams and Microsoft 365 Copilot from the portal.
 4. **Publish the definition.** Select **Publish the definition to this agent**. This writes the console's guardrail instructions, the model and its tools onto the agent as a new version. Until you do, the agent is empty and the instructions live only inside the application, where nobody can review them. Needs write access on the project — **Azure AI Project Manager**, or Foundry User plus agent write.
 5. **Ground answers in Microsoft Learn** (optional). Lets the assistant cite Microsoft's current documentation instead of answering from memory. Only the search terms the model chooses leave the project; nothing measured about your tenant is sent. With an agent named, this is applied when you publish rather than per request, because an agent owns its own tools.
-6. **Record conversations** (optional). Switch on **Record conversations in Foundry** and give the **name** of an Application Insights resource in this subscription. Foundry then records each question, tool call and answer server-side; without it the Traces and Monitor tabs stay empty.
+6. **Record conversations** (optional). Switch on **Record conversations in Foundry** and give the **name** of an Application Insights resource **you already have**. Foundry then records each question, tool call and answer server-side; without it the Traces and Monitor tabs stay empty. Nothing is created for you — if you have no suitable resource and do not want one, leave this off.
 
-   The resource must be one you can actually read. An Application Insights behind **Private Link**, or in a subscription you lack access to, makes the portal's Traces tab fail with *"insufficient access"* even though recording is on. A workspace-backed resource with public query enabled, in the same resource group as the Foundry account, is the simple choice. The project's own managed identity needs **Monitoring Metrics Publisher** on it.
+   Whichever you nominate must be one you can actually read. An Application Insights behind **Private Link**, or in a subscription you lack access to, makes the portal's Traces tab fail with *"insufficient access"* even though recording is on. The Foundry project's own managed identity needs **Monitoring Metrics Publisher** on it.
 
-   The connection is made as you, not by the app. Turning it on replaces any Application Insights connection already on the project; turning it off removes only the one this console made.
+   The connection is made as you, not by the app. Turning it on replaces any Application Insights connection already on the project; turning it off removes only the one this console made, and leaves the resource itself untouched.
 
 
 ### 3.5 Run the full scan
