@@ -226,18 +226,27 @@ One app registration serves both the browser sign-in and the API.
     }
     Invoke-Rest PATCH "https://graph.microsoft.com/v1.0/applications/$appObjectId" @{ requiredResourceAccess = $rra }
 
-    # Enterprise application: assignment required, and the group assigned
-    $spId = az ad sp list --filter "appId eq '$appId'" --query "[0].id" -o tsv
-    if (-not $spId) { $spId = az ad sp create --id $appId --query id -o tsv }
-    Invoke-Rest PATCH "https://graph.microsoft.com/v1.0/servicePrincipals/$spId" @{ appRoleAssignmentRequired = $true }
-    $assigned = az rest --method GET --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/appRoleAssignedTo" --query "value[?principalId=='$GroupObjectId'].id" -o tsv
-    if (-not $assigned) {
-        Invoke-Rest POST "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/appRoleAssignedTo" @{ principalId = $GroupObjectId; resourceId = $spId; appRoleId = '00000000-0000-0000-0000-000000000000' }
-    }
-
     "Tenant ID:                         $TenantId"
     "Application (client) ID:           $appId"
     "Access group Object ID:            $GroupObjectId"
+
+    # Enterprise application: assignment required, and the group assigned. Needs a role that can
+    # administer applications, so a refusal here is reported and left for the portal rather than
+    # stopping the script with the app registration already correct.
+    $spId = az ad sp list --filter "appId eq '$appId'" --query "[0].id" -o tsv
+    if (-not $spId) { $spId = az ad sp create --id $appId --query id -o tsv }
+    try {
+        Invoke-Rest PATCH "https://graph.microsoft.com/v1.0/servicePrincipals/$spId" @{ appRoleAssignmentRequired = $true }
+        $assigned = az rest --method GET --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/appRoleAssignedTo" --query "value[?principalId=='$GroupObjectId'].id" -o tsv
+        if (-not $assigned) {
+            Invoke-Rest POST "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/appRoleAssignedTo" @{ principalId = $GroupObjectId; resourceId = $spId; appRoleId = '00000000-0000-0000-0000-000000000000' }
+        }
+        "Enterprise application: assignment required is on, and the access group is assigned."
+    } catch {
+        "Enterprise application: NOT configured - do step 1.2.5 in the portal instead."
+        "  Enterprise applications > Copilot Blueprint Explorer > Properties > Assignment required = Yes,"
+        "  then Users and groups > Add user/group > the access group from 1.1."
+    }
 
     # Optional. Neither User.Read nor access_as_user needs an administrator's approval, so this only
     # saves each person a one-off prompt on their first sign-in. Granting tenant-wide consent needs a
