@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "4008936093881229856"
+      "templateHash": "4413400004436210592"
     },
     "description": "Copilot Blueprint Explorer: the Azure resources, in one click. Entra objects (the access group and the app registration) are created by hand first; see README.md, Stage 1."
   },
@@ -30,6 +30,13 @@
       "defaultValue": "",
       "metadata": {
         "description": "Object ID of the person who will run Stage 2. They get Contributor on this resource group only. Leave empty if the administrator runs Stage 2 too."
+      }
+    },
+    "deployerUpn": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Sign-in name (UPN) of the deployer, for example alex@contoso.com. Recorded once as the first named person so they can sign in before an access group exists. Remove or re-role them later under Settings, Users. Leave empty to skip."
       }
     },
     "namePrefix": {
@@ -193,6 +200,10 @@
             {
               "name": "Cbx__SecurityGroupObjectId",
               "value": "[parameters('securityGroupObjectId')]"
+            },
+            {
+              "name": "Cbx__DeployerUpn",
+              "value": "[parameters('deployerUpn')]"
             },
             {
               "name": "Cbx__SubscriptionId",

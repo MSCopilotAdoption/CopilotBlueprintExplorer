@@ -148,13 +148,14 @@ One app registration serves both the browser sign-in and the API.
    | `Application.Read.All` | The console reads its own identities' permissions, to show what is granted. |
    | `AppRoleAssignment.ReadWrite.All` | The console grants and revokes application permissions **as the signed-in administrator**. It can never do more than that person could in the portal. |
    | `DelegatedPermissionGrant.ReadWrite.All` | The same, for delegated permissions. |
-   | `GroupMember.Read.All` | Lists the members of the access group on the Users page. |
 
    Then **Add a permission → My APIs → Copilot Blueprint Explorer →** tick `access_as_user` → **Add permissions**.
 
    Finally select **Grant admin consent for \<your organisation\>** and confirm. Every row should show *Granted*.
 
-   > You add nothing else here. Every other permission is granted later from inside the console (Stage 3), with a stated reason for each, and can be revoked there.
+   > **Why these four and no others.** The last three are the console's own hands: every permission granted later in Stage 3 is written by the console acting on your behalf, using exactly these. They cannot themselves be deferred to Stage 3, because a console with no right to grant anything cannot grant itself the right to grant. Microsoft Entra has no way around that — the first consent always happens in a portal. Everything else the console ever needs is granted in Stage 3, with a stated reason for each, and can be revoked there.
+   >
+   > This is also the reason the console can never quietly acquire a permission: each of those grants is an action taken by a named administrator, recorded in the Entra audit log under *their* name, not the application's.
 5. **Enterprise applications →** open **Copilot Blueprint Explorer**:
    - **Properties → Assignment required? = Yes → Save.**
    - **Users and groups → Add user/group →** select the group from 1.1 **→ Assign.**
@@ -209,9 +210,9 @@ One app registration serves both the browser sign-in and the API.
         optionalClaims = @{ accessToken = @(@{ name = 'wids'; essential = $false }); idToken = @(); saml2Token = @() }
     }
 
-    # Delegated permissions: five Microsoft Graph scopes plus this app's own access_as_user, added to any already listed
+    # Delegated permissions: four Microsoft Graph scopes plus this app's own access_as_user, added to any already listed
     $graphAppId  = '00000003-0000-0000-c000-000000000000'
-    $delegated   = 'User.Read', 'Application.Read.All', 'AppRoleAssignment.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All', 'GroupMember.Read.All'
+    $delegated   = 'User.Read', 'Application.Read.All', 'AppRoleAssignment.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All'
     $graphScopes = az ad sp show --id $graphAppId --query "oauth2PermissionScopes[].{value:value,id:id}" -o json | ConvertFrom-Json
     $wanted      = @{ $graphAppId = @($delegated | ForEach-Object { $v = $_; ($graphScopes | Where-Object value -eq $v).id }); $appId = @($scopeId) }
     $rra         = @(az ad app list --filter "appId eq '$appId'" --query "[0].requiredResourceAccess" -o json | ConvertFrom-Json | Where-Object { $_ })
@@ -361,6 +362,7 @@ Select the resource group from 1.4, then fill in:
 | **Api Client Id** | Application (client) ID from 1.2. Required. |
 | **Security Group Object Id** | Object ID from 1.1. (If left empty, only Global Administrators can sign in until a group is set under Settings → Users.) |
 | **Deployer Object Id** | The deployer's Object ID (**Entra → Users →** the person **→ Object ID**). They get Contributor on this resource group only. Leave empty if you run Stage 2 yourself. |
+| **Deployer Upn** | The deployer's sign-in name, for example `alex@contoso.com`. Recorded once as the first **named person**, so they can sign in before the access group exists (see 3.1). Remove or re-role them later under Settings → Users. Leave empty to skip. |
 | Name Prefix | `cbx` (default). Lowercase letters and digits, 2–6 characters. |
 | Web App Name | Leave empty to generate a unique one, or choose a globally unique name. It becomes `https://<name>.azurewebsites.net`. |
 | Web App Sku | `B1` is enough. |
@@ -474,6 +476,7 @@ Send this to the deployer. It contains no secrets.
 | Subscription ID | |
 | Resource group | |
 | Web app name / URL | `https://….azurewebsites.net` |
+| Deployer: Object ID / sign-in name | |
 | App registration: Application (client) ID | |
 | Access group Object ID | |
 | User-assigned identity: name / Client ID / Object (principal) ID | |
@@ -549,6 +552,7 @@ If you used **Option A**, everything below is already set. **Check it and move o
    | `Cbx__SpaClientId` | **The same** app registration client ID |
    | `Cbx__UserAssignedClientId` | The user-assigned identity's **Client ID** (not its principal ID) |
    | `Cbx__SecurityGroupObjectId` | Access group Object ID |
+   | `Cbx__DeployerUpn` | The deployer's sign-in name. Seeds the first named person on first start, so they can sign in before the access group exists. Optional. |
    | `Cbx__SubscriptionId` | Subscription ID |
    | `Cbx__DeploymentOption` | `AskCbx` (every deployment carries the assistant; it stays switched off until Settings turns it on). `Minimal` additionally hides how-to-fix guidance. |
    | `Cbx__AutomationResourceGroup` | Resource group of the Automation account |
@@ -712,11 +716,27 @@ Stage 2 is complete. Tell the Global Administrator.
 
 ## Stage 3: Global Administrator, in the console
 
-### 3.1 First sign-in
+### 3.1 First sign-in, and the read-only walkthrough
 
-Open `https://<web-app-name>.azurewebsites.net` and sign in as the Global Administrator.
+Open `https://<web-app-name>.azurewebsites.net` and sign in.
 
-At this point the console cannot yet read group membership, so it **cannot check the access group**. It therefore admits only Global Administrators, in *recovery* mode. Everyone else sees a message that access cannot be checked, which is expected for now.
+**Two kinds of caller can always sign in, whatever state the access group is in:** anyone holding **Global Administrator**, and anyone on the **Named people** list under Settings → Users. The deployment seeds that list with the **deployer**, from the *Deployer Upn* parameter in step 1.5 — so whoever deployed can sign in immediately, before any access group exists.
+
+That seeded entry is an ordinary one. Once the access group is working, open **Settings → Users → Named people**, and change its role or remove it like any other. It is written once, on the first start, and never written again, so removing it is permanent.
+
+At this point the console cannot yet read group membership, so it cannot check the access group, and anyone else sees a message saying so. That is expected until 3.2.
+
+**Nothing has been granted yet, and the console is already worth walking through.** The sign-in asked for nothing beyond the four permissions in 1.2, so this is a fair thing to show a security team before they approve anything:
+
+| Where | What you can see with no permissions granted |
+|---|---|
+| **Overview** | What the console is, and what it will and will not do. |
+| **Assessment → Architecture** | The five layers of securing Copilot, and which control sits in which layer. |
+| **Work items** | Every check the console can make, with its Microsoft Learn reference — the full scope of the assessment, before a single tenant read. All show as *not measured*. |
+| **Settings → Roles & permissions** | Every permission the console will ever ask for, what each is used for, and which are optional. Nothing is granted; the page is the request list. |
+| **Help** | The full document, the FAQ, and what the console reads and why. |
+
+Turn on **No scan** in the top bar first if you want a guarantee in the product itself rather than a promise: while it is on, the console reads nothing from your tenant at all. See 3.3.
 
 ### 3.2 Grant the two basic permissions
 
@@ -809,15 +829,20 @@ Any manual answers from 3.3 stay in place. A measured reading always takes prece
 
 ---
 
-## If the two basic permissions will not be granted: named people
+## Named people: access without reading the directory
 
-If the organisation will not grant `GroupMember.Read.All` and `User.ReadBasic.All`, the console cannot check the group. An administrator can instead name the people allowed in:
+A **named person** may sign in whether or not the access group lists them, and whether or not that group can be checked at all. Two uses:
 
-1. Sign in as Global Administrator (recovery mode admits you, as in 3.1).
+- **Before the group exists.** The deployment seeds this list with the deployer (3.1), which is how the console is reachable on its first start.
+- **Instead of the group.** If the organisation will not grant `GroupMember.Read.All` and `User.ReadBasic.All`, the console cannot read the directory at all. Naming people needs no directory permission whatsoever.
+
+To use it:
+
+1. Sign in as a Global Administrator, or as the seeded deployer.
 2. **Settings → Users → Named people:** add each person's UPN and choose their role (Reader by default).
 3. Make sure each named person can sign in at all. With **Assignment required = Yes**, they must be assigned to the enterprise application, directly or through the group (step 1.2.5).
 
-The console records each named person's account the first time they sign in. It refuses a different account that later takes over the same UPN.
+The console records each named person's account the first time they sign in, and refuses a different account that later takes over the same UPN. So the complete answer to *who can sign in* is: **anyone in the access group, anyone on this list, or any Global Administrator.**
 
 ---
 

@@ -17,6 +17,9 @@ param securityGroupObjectId string = ''
 @description('Object ID of the person who will run Stage 2. They get Contributor on this resource group only. Leave empty if the administrator runs Stage 2 too.')
 param deployerObjectId string = ''
 
+@description('Sign-in name (UPN) of the deployer, for example alex@contoso.com. Recorded once as the first named person so they can sign in before an access group exists. Remove or re-role them later under Settings, Users. Leave empty to skip.')
+param deployerUpn string = ''
+
 // ---------------------------------------------------------------------------
 // Hosting
 // ---------------------------------------------------------------------------
@@ -131,6 +134,9 @@ resource site 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'Cbx__SpaClientId', value: apiClientId }
         { name: 'Cbx__UserAssignedClientId', value: uami.properties.clientId }
         { name: 'Cbx__SecurityGroupObjectId', value: securityGroupObjectId }
+        // Seeds the first named person on first start, so the deployer can sign in before an access
+        // group exists. An ordinary entry from then on: re-role or remove it under Settings, Users.
+        { name: 'Cbx__DeployerUpn', value: deployerUpn }
         { name: 'Cbx__SubscriptionId', value: subscription().subscriptionId }
         // Every deployment carries the assistant; whether it is switched on, and which Foundry
         // project answers, is decided later in Settings. Asking at deploy time only produced
