@@ -383,7 +383,7 @@ Select the resource group from 1.4, then fill in:
 | **Api Client Id** | Application (client) ID from 1.2. Required. |
 | **Security Group Object Id** | Object ID from 1.1. (If left empty, only Global Administrators can sign in until a group is set under Settings → Users.) |
 | **Deployer Object Id** | The deployer's Object ID (**Entra → Users →** the person **→ Object ID**). They get Contributor on this resource group only. Leave empty if you run Stage 2 yourself. |
-| **Deployer Upn** | The deployer's sign-in name, for example `alex@contoso.com`. Recorded once as the first **named person**, so they can sign in before the access group exists (see 3.1). Remove or re-role them later under Settings → Users. Leave empty to skip. |
+| **Deployer Upn** | The deployer's sign-in name, for example `alex@contoso.com`. Recorded once as the first **named person**, so they can sign in before the access group exists (see 3.1). If the deployer is a **guest** in this tenant, either form works — their own address, or the `alex_contoso.com#EXT#@yourtenant.onmicrosoft.com` name Entra stores them under. Remove or re-role them later under Settings → Users. Leave empty to skip. |
 | Name Prefix | `cbx` (default). Lowercase letters and digits, 2–6 characters. |
 | Web App Name | Leave empty to generate a unique one, or choose a globally unique name. It becomes `https://<name>.azurewebsites.net`. |
 | Web App Sku | `B1` is enough. |
@@ -759,7 +759,7 @@ At this point the console cannot yet read group membership, so it cannot check t
 
 Turn on **No scan** in the top bar first if you want a guarantee in the product itself rather than a promise: while it is on, the console reads nothing from your tenant at all. See 3.4.
 
-> **Until 3.2 is done, the access group is not yet being enforced.** The console cannot read group membership, so it cannot check the group, and it admits only Global Administrators and named people. Everyone else is refused with a message saying the check is unavailable. Microsoft Entra is still enforcing **Assignment required** from step 1.2.5, so only people assigned to the enterprise application can obtain a token in the first place.
+> **Until 3.3 is done, the access group is not being enforced, and the console says so.** It cannot read group membership yet, so it cannot check the group at all. Rather than refuse everyone — which would leave nobody able to reach the page that fixes it — it admits whoever signs in and shows a banner saying the gate is open. Two things bound that window: Microsoft Entra is still enforcing **Assignment required** from step 1.2.5, so only people assigned to the enterprise application can obtain a token at all; and the application holds no permission on your tenant at this point, so there is nothing for anyone to read. The window closes the moment 3.3 is finished.
 
 ### 3.2 Let the console manage permissions (one approval)
 
@@ -919,7 +919,8 @@ Some grants live outside the resource group and are **not** removed when it is d
 | **AADSTS50011** redirect URI mismatch | The SPA redirect URI in step 1.6 is missing or different. It must be exactly `https://<web-app-name>.azurewebsites.net` under **Single-page application** (not *Web*). |
 | **AADSTS65001** or "Need admin approval" | Admin consent from step 1.2.4 is missing, or `access_as_user` was not added under **My APIs**. |
 | "This application has not been configured yet" (`setup_in_progress`) | No access group is set, and the person is not a Global Administrator. Set the group ID at deployment, or under **Settings → Users**. |
-| "Access cannot be checked" (`access_gate_unavailable`) | The access-group permissions are missing, or were granted but the web app has not been restarted since (3.3). Or use named people. |
+| "Access cannot be checked" (`access_gate_unavailable`) | Microsoft Graph could not be reached, or the call timed out. This is transient — retry before changing anything. A *missing* permission no longer produces this: it opens the setup window described in 3.1 instead. |
+| The deployer cannot sign in | If they are a guest, `Cbx__DeployerUpn` must be set. Either their own address or the `#EXT#` form works. Check **Settings → Users → Named people** once you are in. |
 | "You are not a member of the group" (`not_in_access_group`) | Add the person to the access group. Membership is re-checked every 15 minutes. |
 | Global Administrator refused at first sign-in or in recovery | The `wids` claim is missing (step 1.2.3). Without it, the console cannot see the Global Administrator role. |
 | Pages fail with a federated-identity or token-exchange error | The federated credential (1.6) must name the user-assigned identity **attached to the web app**, and `Cbx__UserAssignedClientId` must be that identity's **Client ID**. |
