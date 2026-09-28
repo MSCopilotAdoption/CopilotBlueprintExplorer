@@ -149,7 +149,9 @@ One app registration serves both the browser sign-in and the API.
    | `User.Read` | Delegated | Sign-in. Added by Microsoft Entra when the app is registered. |
    | `access_as_user` | Delegated | Lets the browser call this application's own API. |
 
-   Neither requires admin consent, so there is nothing here with a **Not granted** warning. Selecting **Grant admin consent** is optional and only saves each user a one-off sign-in prompt.
+   Neither requires admin consent, so there is nothing here with a **Not granted** warning.
+
+   **Grant admin consent is optional here.** If the button is available, selecting it saves each person a one-off approval prompt at their first sign-in. If it is greyed out, or refuses with *"Insufficient privileges to complete the operation"*, you do not hold a role that can consent on the organisation's behalf — **carry on regardless**. Both permissions are user-consentable, so each person approves them once when they first sign in. Only if your tenant blocks user consent entirely will anyone see *"needs admin approval"*, and then a Global Administrator can select **Grant admin consent** on this page.
 
    > **Nothing else is added here, and nothing else is consented here.** Every permission this console ever uses — including the three it needs to grant permissions at all — is granted later, from inside the console, by a Global Administrator who can see what each one is for (Stage 3.2). Until that happens the application holds no access to your tenant whatsoever.
    >
@@ -233,22 +235,33 @@ One app registration serves both the browser sign-in and the API.
         Invoke-Rest POST "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/appRoleAssignedTo" @{ principalId = $GroupObjectId; resourceId = $spId; appRoleId = '00000000-0000-0000-0000-000000000000' }
     }
 
-    # Consent for the two that need none anyway, so nobody sees a sign-in prompt. Adds, never removes.
-    $graphSpId = az ad sp show --id $graphAppId --query id -o tsv
-    $grants    = @((az rest --method GET --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?%24filter=clientId%20eq%20'$spId'" -o json | ConvertFrom-Json).value)
-    foreach ($need in @{ resourceId = $graphSpId; scope = $delegated }, @{ resourceId = $spId; scope = @('access_as_user') }) {
-        $grant = $grants | Where-Object { $_.resourceId -eq $need.resourceId -and $_.consentType -eq 'AllPrincipals' } | Select-Object -First 1
-        if ($grant) {
-            $scope = (@($grant.scope -split ' ') + $need.scope | Where-Object { $_ } | Select-Object -Unique) -join ' '
-            Invoke-Rest PATCH "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/$($grant.id)" @{ scope = $scope }
-        } else {
-            Invoke-Rest POST 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants' @{ clientId = $spId; consentType = 'AllPrincipals'; resourceId = $need.resourceId; scope = $need.scope -join ' ' }
-        }
-    }
-
     "Tenant ID:                         $TenantId"
     "Application (client) ID:           $appId"
     "Access group Object ID:            $GroupObjectId"
+
+    # Optional. Neither User.Read nor access_as_user needs an administrator's approval, so this only
+    # saves each person a one-off prompt on their first sign-in. Granting tenant-wide consent needs a
+    # role many tenants reserve, so a refusal here is expected and deliberately not fatal.
+    try {
+        $graphSpId = az ad sp show --id $graphAppId --query id -o tsv
+        $grants    = @((az rest --method GET --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?%24filter=clientId%20eq%20'$spId'" -o json | ConvertFrom-Json).value)
+        foreach ($need in @{ resourceId = $graphSpId; scope = $delegated }, @{ resourceId = $spId; scope = @('access_as_user') }) {
+            $grant = $grants | Where-Object { $_.resourceId -eq $need.resourceId -and $_.consentType -eq 'AllPrincipals' } | Select-Object -First 1
+            if ($grant) {
+                $scope = (@($grant.scope -split ' ') + $need.scope | Where-Object { $_ } | Select-Object -Unique) -join ' '
+                Invoke-Rest PATCH "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/$($grant.id)" @{ scope = $scope }
+            } else {
+                Invoke-Rest POST 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants' @{ clientId = $spId; consentType = 'AllPrincipals'; resourceId = $need.resourceId; scope = $need.scope -join ' ' }
+            }
+        }
+        "Consent for User.Read and access_as_user: granted for everyone, so nobody sees a prompt."
+    } catch {
+        "Consent for User.Read and access_as_user: NOT granted, and that is fine."
+        "  The error above is expected in a tenant that reserves consent to a few roles. Both"
+        "  permissions are user-consentable, so each person simply approves them once at their first"
+        "  sign-in. Only if your tenant blocks user consent entirely will someone see 'needs admin"
+        "  approval' - then ask a Global Administrator to select Grant admin consent on this app."
+    }
 }
 ```
 
