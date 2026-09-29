@@ -886,7 +886,13 @@ To use it:
 
 1. Sign in as a Global Administrator, or as the seeded deployer.
 2. **Settings → Users → Named people:** add each person's UPN and choose their role (Reader by default).
-3. Make sure each named person can sign in at all. With **Assignment required = Yes**, they must be assigned to the enterprise application, directly or through the group (step 1.2.5).
+3. The console assigns them to the enterprise application at the same time, because **Assignment required = Yes** means Entra refuses a token to anyone who is not assigned — before the console is reached at all. The row shows the result, and anyone added before this was automatic can be repaired with **Assign**.
+
+> **`AADSTS50105` — "The signed in user is blocked because they are not a direct member of a group with access, nor had access directly assigned"**
+>
+> That is Entra's own refusal, not this console's, and naming the person here does not by itself clear it: with **Assignment required = Yes** the token is refused first. Adding a person now assigns them as well, provided you hold a role that can assign users to an application (Cloud Application Administrator or Global Administrator) and the delegated `AppRoleAssignment.ReadWrite.All` permission has been granted. If not, the row says **blocked by Entra** and you can do it in the portal: **Enterprise applications → Copilot Blueprint Explorer → Users and groups → Add user/group**.
+>
+> Use the name the person actually signs in with. A guest invited from another tenant signs in with their **home** address (`alex@contoso.com`), which is not the same as the `#EXT#` name Entra stores, and can also differ from their `mail` attribute. The console matches either form; Entra's assignment is by account, so it is unaffected.
 
 The console records each named person's account the first time they sign in, and refuses a different account that later takes over the same UPN. So the complete answer to *who can sign in* is: **anyone in the access group, anyone on this list, or any Global Administrator.**
 
@@ -922,6 +928,7 @@ Some grants live outside the resource group and are **not** removed when it is d
 | "Access cannot be checked" (`access_gate_unavailable`) | Microsoft Graph could not be reached, or the call timed out. This is transient — retry before changing anything. A *missing* permission no longer produces this: it opens the setup window described in 3.1 instead. |
 | The deployer cannot sign in | If they are a guest, `Cbx__DeployerUpn` must be set. Either their own address or the `#EXT#` form works. Check **Settings → Users → Named people** once you are in. |
 | "You are not a member of the group" (`not_in_access_group`) | Add the person to the access group. Membership is re-checked every 15 minutes. |
+| A colleague sees `AADSTS50105` from Microsoft, not from the console | Entra refused the token because **Assignment required = Yes** and they are not assigned. Add them under **Settings → Users → Named people**, which assigns them as well; or, if the row says **blocked by Entra**, use **Enterprise applications → Users and groups → Add user/group**. Naming them alone is not enough. |
 | Global Administrator refused at first sign-in or in recovery | The `wids` claim is missing (step 1.2.3). Without it, the console cannot see the Global Administrator role. |
 | Pages fail with a federated-identity or token-exchange error | The federated credential (1.6) must name the user-assigned identity **attached to the web app**, and `Cbx__UserAssignedClientId` must be that identity's **Client ID**. |
 | Deployment log says *"Couldn't detect a version for the platform 'dotnet' in the repo"* | The zip went through a build step. That happens with Deployment Center → Publish files (new). Deploy with the 2.2 Cloud Shell block instead. |
