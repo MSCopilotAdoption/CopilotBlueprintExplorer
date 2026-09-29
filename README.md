@@ -722,8 +722,10 @@ Work through **Settings → Roles & permissions** from top to bottom. Every row 
 
 **Entirely optional, and nothing here is created by the deployment.** The template creates one App Service and one Automation account, and no more. The Foundry project, the model deployment and — if you want conversation recording — the Application Insights resource are all **yours to provide**, existing or new, in whatever subscription and resource group your standards say. The console only points at what you give it. Skip this section and the rest of the console works exactly the same.
 
-1. **Point it at your project.** **Settings → Configuration → AskCBX**: switch it on, then enter the **project endpoint** (`https://<resource>.services.ai.azure.com/api/projects/<project>`) and the **model deployment name**. Save.
-2. **Grant the app identity.** Under **Roles & permissions**, give the web app's managed identity **Foundry User** on that project. Ask a question to confirm it answers.
+1. **Point it at your project.** **Settings → Configuration → AskCBX**: switch it on, then enter the **project endpoint** (`https://<resource>.services.ai.azure.com/api/projects/<project>`) and the **model deployment name**. Leave **Grant what AskCBX needs when I save** ticked, and **Save**. The message confirms what it granted.
+2. **That is the whole of it.** The card shows the only two things the assistant needs under **Access AskCBX needs**, with Grant and Revoke beside each: the **Foundry User** role on your project, held by the web app's managed identity, and the **Azure Service Management** delegated permission that lets the console create that role assignment as you. Neither reads your tenant, so **AskCBX can be switched on without granting any of the assessment's permissions** — which is what you want when someone needs to ask about an implementation before any scanning is agreed. Granting the role needs Owner or User Access Administrator on the project; if you do not hold it, the row says so and the same grant is available under **Roles & permissions**.
+
+   Ask a question to confirm it answers.
 
 That is enough for a working assistant. The rest turns it into an agent you can govern, and each step is optional on its own.
 
