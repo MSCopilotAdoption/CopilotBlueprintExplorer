@@ -136,6 +136,7 @@ Everything it does is listed under the block, with the portal equivalent, so not
     $AppName          = 'Copilot Blueprint Explorer'
     $CollectorName    = 'CBX Purview Collector'
     $DeployerUpn      = ''       # optional: also made an owner of the collector app registration
+    $RegisterInPurview = $true   # $false: skip the Security & Compliance registration at the end
     $RenewCertificate = $false   # $true: replace an existing CbxPurviewCert (yearly renewal)
     $CertificateDays  = 365
     $RunbookBaseUrl   = 'https://raw.githubusercontent.com/MSCopilotAdoption/CopilotBlueprintExplorer/main/runbooks/'
@@ -328,6 +329,49 @@ Everything it does is listed under the block, with the portal equivalent, so not
         "Cbx__ApiClientId=$appId" "Cbx__SpaClientId=$appId" "Cbx__SecurityGroupObjectId=$groupId" `
         "Cbx__PurviewCollectorAppId=$collectorAppId" "Cbx__PurviewOrganization=$organization" -o none
 
+    # --- 6. Register the collector in Security & Compliance and put it in two read-only role groups.
+    # Last, because it needs a second, interactive sign-in - Security & Compliance PowerShell has no
+    # silent path. Non-fatal: it needs Purview role-group rights that a Stage 1 administrator does
+    # not always hold, and Stage 3.5 repeats it on its own if this is skipped or refused.
+    $purviewNote = 'skipped ($RegisterInPurview = $false)'
+    if ($RegisterInPurview) {
+        try {
+            # Cloud Shell's preinstalled Exchange module is not always current, and an older
+            # Connect-IPPSSession has no -UserPrincipalName - which fails, and then every cmdlet
+            # below is missing because no session was ever opened.
+            $have = Get-Module -ListAvailable ExchangeOnlineManagement | Sort-Object Version -Descending | Select-Object -First 1
+            if (-not $have -or $have.Version -lt [version]'3.5.0') {
+                Install-Module ExchangeOnlineManagement -MinimumVersion 3.5.0 -Scope CurrentUser -Force -AllowClobber
+            }
+            Import-Module ExchangeOnlineManagement -MinimumVersion 3.5.0 -Force
+
+            ''
+            'Signing in to Security & Compliance. On Linux and in Cloud Shell this prints a code to'
+            'enter at microsoft.com/devicelogin; in a desktop shell it opens a browser window.'
+            $connect = @{ ShowBanner = $false }
+            # Whoever is running this block is the one who will be signing in.
+            $signInAs = az ad signed-in-user show --query userPrincipalName -o tsv
+            if ($signInAs -and (Get-Command Connect-IPPSSession).Parameters.ContainsKey('UserPrincipalName')) {
+                $connect['UserPrincipalName'] = $signInAs
+            }
+            Connect-IPPSSession @connect
+
+            if (-not (Get-Command Add-RoleGroupMember -ErrorAction SilentlyContinue)) {
+                throw 'Connect-IPPSSession opened no Security & Compliance session, so its cmdlets are missing.'
+            }
+            if (-not (Get-ServicePrincipal | Where-Object AppId -eq $collectorAppId)) {
+                New-ServicePrincipal -AppId $collectorAppId -ServiceId $collectorSpId -DisplayName $CollectorName | Out-Null
+            }
+            $added = foreach ($roleGroup in 'SecurityReader', 'GlobalReader') {
+                try { Add-RoleGroupMember -Identity $roleGroup -Member $CollectorName -ErrorAction Stop; $roleGroup }
+                catch { if ($_.Exception.Message -match 'already a member') { $roleGroup } else { "$roleGroup FAILED" } }
+            }
+            $purviewNote = "registered, role groups: $($added -join ', ')"
+        } catch {
+            $purviewNote = "NOT done - $($_.Exception.Message) Run the block in Stage 3.5, step 3 instead."
+        }
+    }
+
     # --- Handover sheet
     ''
     'Copy these into the handover sheet (1.3). None of them is a secret.'
@@ -346,6 +390,7 @@ Everything it does is listed under the block, with the portal equivalent, so not
     "  Enterprise application:  $assignmentNote"
     "  Admin consent:           $consentNote"
     "  Collector certificate:   $certNote"
+    "  Purview registration:    $purviewNote"
     "  MicrosoftTeams module:   $(az rest --method GET --url "$aa/modules/MicrosoftTeams$api" --query properties.provisioningState -o tsv) (Succeeded means ready; run the block again later to re-check)"
     foreach ($name in 'Get-CbxDlpPolicies', 'Get-CbxPowerPlatform') {
         "  Runbook {0,-22} {1}" -f $name, (az rest --method GET --url "$aa/runbooks/$name$api" --query properties.state -o tsv)
@@ -609,18 +654,47 @@ Work through **Settings → Roles & permissions** from top to bottom. Every row 
 
 1. **App registration → Grant all.** These are delegated permissions, so they only ever act as the signed-in administrator. Then **sign out and back in**, so that your session picks them up.
 2. **Managed identity → Grant all.** These are the app-only reads. If you used Option B and skipped the role assignments, **Automation Job Operator** and **Reader** appear here too.
-3. **Purview collector app** (if created):
-   - Under **Settings → Configuration → Purview DLP collector**, check the collector client ID and tenant organisation (already filled if they were set at deployment). **Save.**
+3. **Purview collector app.** It is always created &mdash; the Automation account and its collector are part of every deployment.
+   - Under **Settings → Configuration → Purview DLP collector**, check the collector client ID and tenant organisation (the 1.2 block fills both in). **Save.**
    - **Roles & permissions → Purview collector app → Grant all.** This grants Exchange.ManageAsApp, Organization.Read.All and the Entra **Global Reader** role.
-   - Register the collector in Security & Compliance and add it to two **read-only** Purview role groups. Run this once in Cloud Shell (PowerShell), or in any PowerShell with the ExchangeOnlineManagement module and the Azure CLI:
+   - **Security & Compliance registration: normally already done.** The 1.2 block registers the collector and adds it to the two **read-only** Purview role groups, and its handover output says whether it worked. Run the block below only if that line reported it was skipped or refused &mdash; for example because whoever ran 1.2 held no Purview role-group rights. It is safe to run again.
+
+     <details>
+     <summary>Register the collector by hand</summary>
+
+     Run in Cloud Shell (PowerShell), or in any PowerShell with the Azure CLI:
+
      ```powershell
      & {
          $AdminUpn       = 'admin@contoso.com'       # you
-         $CollectorName  = 'CBX Purview Collector'   # as created in 1.3
+         $CollectorName  = 'CBX Purview Collector'   # as created in 1.2
          $CollectorAppId = ''                        # empty: looked up by name
 
-         Connect-IPPSSession -UserPrincipalName $AdminUpn   # in Cloud Shell, add -Device if no sign-in window opens
+         $ErrorActionPreference = 'Stop'
+
+         # Cloud Shell's preinstalled Exchange module is not always current, and an older
+         # Connect-IPPSSession has no -UserPrincipalName - which fails here, and then every
+         # Security & Compliance cmdlet below is missing because no session was ever opened.
+         $have = Get-Module -ListAvailable ExchangeOnlineManagement | Sort-Object Version -Descending | Select-Object -First 1
+         if (-not $have -or $have.Version -lt [version]'3.5.0') {
+             Install-Module ExchangeOnlineManagement -MinimumVersion 3.5.0 -Scope CurrentUser -Force -AllowClobber
+         }
+         Import-Module ExchangeOnlineManagement -MinimumVersion 3.5.0 -Force
+
+         # On Linux and in Cloud Shell this prints a code to enter at microsoft.com/devicelogin;
+         # in a desktop shell it opens a browser window.
+         $connect = @{ ShowBanner = $false }
+         if ($AdminUpn -and (Get-Command Connect-IPPSSession).Parameters.ContainsKey('UserPrincipalName')) {
+             $connect['UserPrincipalName'] = $AdminUpn
+         }
+         Connect-IPPSSession @connect
+
+         if (-not (Get-Command Add-RoleGroupMember -ErrorAction SilentlyContinue)) {
+             throw 'Connect-IPPSSession opened no Security & Compliance session, so its cmdlets are missing. Check the sign-in above and run the block again.'
+         }
+
          if (-not $CollectorAppId) { $CollectorAppId = az ad app list --filter "displayName eq '$CollectorName'" --query "[0].appId" -o tsv }
+         if (-not $CollectorAppId) { throw "No app registration named '$CollectorName'." }
          $collectorSpId = az ad sp list --filter "appId eq '$CollectorAppId'" --query "[0].id" -o tsv
          if (-not (Get-ServicePrincipal | Where-Object AppId -eq $CollectorAppId)) {
              New-ServicePrincipal -AppId $CollectorAppId -ServiceId $collectorSpId -DisplayName $CollectorName
@@ -631,11 +705,13 @@ Work through **Settings → Roles & permissions** from top to bottom. Every row 
          }
      }
      ```
-   - Optional, and shown as optional on the page:
+
+     </details>
+   - Then grant the remaining two on the same page:
      - **Sites.FullControl.All** (SharePoint), for SharePoint and OneDrive tenant settings.
      - **Compliance Administrator**, for Insider Risk, Communication Compliance and audit retention.
 
-     Both can write, although the runbook only reads. Without them, those checks stay manual answers, with the reason shown.
+     Both can write, although the runbook only reads, which is why they are granted deliberately rather than bundled into **Grant all**. Grant them for the assessment; revoking either afterwards is one click on the same page, and is the customer's call. Without them, those checks stay manual answers with the reason shown.
 4. **Automation account** (Power Platform):
    - **Power Platform management app → Grant.** This needs Power Platform Administrator. If the row says so, first grant *PowerApps Service* under **App registration**.
    - On the **Agent estate** page, select **Collect from Power Platform**. This discovers your Dataverse environments.
@@ -720,7 +796,7 @@ Some grants live outside the resource group and are **not** removed when it is d
 |---|---|
 | **AADSTS50105** at sign-in | The person is not assigned to the enterprise application. Add them to the access group (group assignment needs Entra ID P1), or assign them directly. |
 | **Settings is missing, and you are a Global Administrator** | The console recognises a Global Administrator only through the `wids` directory-role claim in the access token. That claim does not arrive in every tenant &mdash; it is absent even where the optional claim is configured on the app registration &mdash; so do not rely on it. Use the role book instead: the **first person to sign in to a new deployment becomes Super Admin**, and after that an administrator adds others under **Settings → Users**. If nobody can reach Settings at all, see the next row. The banner on the page says which of the two cases you are in. |
-| **Nobody can reach Settings** (the deployment has no usable administrator) | Whoever owns the Azure subscription can set the role directly. Web app → **Development Tools → Advanced Tools → Go** (Kudu) → **Debug console → CMD**, open `/home/data/cbx-roles.json` and add or edit an entry: `{"Upn":"you@contoso.com","Role":"SuperAdmin"}` inside `Members`. Save, then **Restart** the web app and sign in again. This happens most often when *Deployer Upn* in step 1.1 was a different sign-in name from the one actually used &mdash; the seeded entry then fills the role book without matching anyone, which stops the first-sign-in claim from firing. |
+| **Nobody can reach Settings** (the deployment has no usable administrator) | Whoever owns the Azure subscription can reset this. Web app → **Development Tools → Advanced Tools → Go** (Kudu) → **Debug console → CMD**, then `cd /home/data` and **delete `cbx-roles.json`**. Restart the web app and sign in: with the role book empty, the first person to sign in becomes Super Admin. The deployer seed does not come back &mdash; it is written once and keyed on a different file &mdash; so this is safe to do. (If you would rather not empty it, edit the file instead and add `{"Upn":"you@contoso.com","Role":"SuperAdmin"}` inside `Members`.) This state happens most often when *Deployer Upn* in step 1.1 was not the exact sign-in name used: the seeded entry then fills the role book without matching anyone, which also stops the first-sign-in claim from firing. |
 | **Re-scan tenant is enabled although nothing has been granted** | The button asks `/api/admin/permissions/consent` whether a scan would read anything. Fixed in this release: that call used to be refused to a Reader, and an unanswered question left the button enabled. If it persists, you are on an older build. |
 | **AADSTS50011** redirect URI mismatch | The SPA redirect URI is missing or different. It must be exactly `https://<web-app-name>.azurewebsites.net` under **Single-page application** (not *Web*). Re-running the 1.2 block sets it from the real web app. |
 | **AADSTS65001** or "Need admin approval" | Tenant-wide consent was refused in 1.2, and `access_as_user` or `User.Read` was not consented by the person either. Ask a Global Administrator to select **Grant admin consent** on the app registration. |
