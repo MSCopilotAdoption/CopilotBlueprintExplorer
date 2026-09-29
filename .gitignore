@@ -1,2 +1,3 @@
-# The application zip is handed to each customer directly and is never pushed.
+# Tracked in the private repository, which is where Stage 2 fetches it from with a read-only
+# token. Listed here so it is never added to the public copy of this kit by accident.
 release/

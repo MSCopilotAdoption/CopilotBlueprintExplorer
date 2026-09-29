@@ -1,18 +1,30 @@
-metadata description = 'Copilot Blueprint Explorer: the Azure resources, in one click. Entra objects (the access group and the app registration) are created by hand first; see README.md, Stage 1.'
+metadata description = 'Copilot Blueprint Explorer: every Azure resource in one click. Run this first, then the single Cloud Shell block in README.md Stage 1.2, which creates the Entra objects and writes the settings that depend on them.'
 
 targetScope = 'resourceGroup'
 
 // ---------------------------------------------------------------------------
-// From Stage 1 (created by hand in Entra ID)
+// Set by the Stage 1.2 block after this deployment, not here.
+//
+// These four identify Entra objects that do not exist yet when the button runs. Leaving them empty
+// is the normal path: the block creates the objects against the real web app and identity, then
+// writes these same settings. Supply them only when the Entra objects already exist.
 // ---------------------------------------------------------------------------
 
-@description('Application (client) ID of the "Copilot Blueprint Explorer" app registration created in Stage 1.')
-@minLength(36)
-@maxLength(36)
-param apiClientId string
+@description('Leave empty. Application (client) ID of the "Copilot Blueprint Explorer" app registration, which the Stage 1.2 block creates and fills in.')
+param apiClientId string = ''
 
-@description('Object ID of the Entra security group whose members may use the console. Leave empty to set it later under Settings, Users, or to use named people instead.')
+@description('Leave empty. Object ID of the Entra security group whose members may use the console. The Stage 1.2 block creates the group and fills this in.')
 param securityGroupObjectId string = ''
+
+@description('Leave empty. Application (client) ID of the "CBX Purview Collector" app registration, which the Stage 1.2 block creates and fills in.')
+param purviewCollectorAppId string = ''
+
+@description('Leave empty. Your tenant\'s primary onmicrosoft.com domain. The Stage 1.2 block reads it from the tenant and fills it in.')
+param purviewOrganization string = ''
+
+// ---------------------------------------------------------------------------
+// The deployer
+// ---------------------------------------------------------------------------
 
 @description('Object ID of the person who will run Stage 2. They get Contributor on this resource group only. Leave empty if the administrator runs Stage 2 too.')
 param deployerObjectId string = ''
@@ -40,20 +52,13 @@ param webAppName string = ''
 param webAppSku string = 'B1'
 
 // ---------------------------------------------------------------------------
-// Collection from Purview and Power Platform (always deployed)
+// Collection from Purview and Power Platform. The Automation account is always created: without it
+// the Purview, Exchange, Teams, SharePoint and Power Platform readings have nowhere to run and the
+// controls behind them stay manual, which is most of what makes this assessment worth running.
 // ---------------------------------------------------------------------------
 
-@description('Leave empty. The Deploy to Azure button then imports the runbooks from the runbooks folder next to this template. Only set it to use another copy: a public base URL ending in a slash. Loaded from a file, the template imports nothing and you import the two runbooks in Stage 2.')
+@description('Leave empty. The Deploy to Azure button then imports the runbooks from the runbooks folder next to this template. Only set it to use another copy: a public base URL ending in a slash. Loaded from a file, the template imports nothing and the Stage 1.2 block imports them instead.')
 param runbookBaseUrl string = ''
-
-@description('Application (client) ID of the "CBX Purview Collector" app registration created in Stage 1 (step 1.3).')
-@minLength(36)
-@maxLength(36)
-param purviewCollectorAppId string
-
-@description('Your tenant\'s primary onmicrosoft.com domain, for example contoso.onmicrosoft.com (Entra admin centre, Overview, Primary domain). Security & Compliance PowerShell accepts only this form.')
-@minLength(17)
-param purviewOrganization string
 
 param tags object = {
   workload: 'copilot-blueprint-explorer'
@@ -236,4 +241,6 @@ output managedIdentityPrincipalId string = uami.properties.principalId
 output webAppSystemIdentityPrincipalId string = site.identity.principalId
 output automationAccountName string = automation.name
 output automationAccountPrincipalId string = automation.identity.principalId
-output runbooksImportedFrom string = importRunbooks ? runbookBase : 'not imported: import the two runbooks in Stage 2 (2.4)'
+output resourceGroupName string = resourceGroup().name
+output runbooksImportedFrom string = importRunbooks ? runbookBase : 'not imported: the Stage 1.2 block imports them'
+output nextStep string = 'Run the single Cloud Shell block in README.md, Stage 1.2. It creates the Entra objects against this deployment and writes the settings they fill in.'
