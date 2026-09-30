@@ -725,9 +725,13 @@ Work through **Settings → Roles & permissions** from top to bottom. Every row 
 1. **Point it at your project.** **Settings → Configuration → AskCBX**: switch it on, then enter the **project endpoint** (`https://<resource>.services.ai.azure.com/api/projects/<project>`) and the **model deployment name**. Leave **Grant what AskCBX needs when I save** ticked, and **Save**. The message confirms what it granted.
 2. **That is the whole of it.** The card shows everything the assistant needs under **Access AskCBX needs**, with Grant and Revoke beside each: the **Foundry User** role on your project, held by the web app's managed identity, and the **Azure Service Management** delegated permission that lets the console create that role assignment as you. (A third row, **Foundry Project Manager**, appears for publishing in step 4 and is never granted automatically.) None of them reads your tenant, so **AskCBX can be switched on without granting any of the assessment's permissions** — which is what you want when someone needs to ask about an implementation before any scanning is agreed.
 
-   **Owning the subscription is enough, end to end.** The two role grants need Owner or User Access Administrator on the project, which a subscription owner has. The delegated permission normally needs a privileged directory role to grant tenant-wide — so where you do not hold one, its button says **Consent** instead of Grant and asks Entra directly, in the ordinary prompt, for **you alone**. That needs no directory role and nothing granted in this console beforehand, which matters because granting it the usual way needs a Graph permission a new deployment has not been given yet. Until that consent exists the two Foundry roles cannot even be listed, and the card says so rather than hiding them.
+   **Owning the subscription is enough, end to end** — and there is always a route that no tenant policy can refuse.
 
-   If your tenant switches user consent off entirely, the button says so plainly and an administrator has to grant that one permission; everything after it still works.
+   - The two role grants need Owner or User Access Administrator on the project, which a subscription owner has.
+   - The delegated permission normally needs a privileged directory role to grant tenant-wide, so where you do not hold one its button says **Consent** and asks Entra for **you alone** instead.
+   - **If your tenant requires admin approval for user consent, that is refused too** — and you still do not need it. Select **Assign them in the Azure portal instead** under the table. The card gives you the managed identity's object id, the project, and the role names. An Azure role assignment needs **no Entra consent of any kind**, which is why it works when nothing else does, and is how any other application in your tenant reaches a Foundry project.
+
+   The permission only ever existed so the console could make that assignment for you. Assign it yourself and AskCBX answers as soon as Azure applies it.
 
    Ask a question to confirm it answers.
 
