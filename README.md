@@ -1,6 +1,6 @@
-# Copilot Blueprint Explorer: deployment kit
+# Copilot Security & Governance Workbench: deployment kit
 
-Copilot Blueprint Explorer (CBX) is a web console that assesses a Microsoft 365 tenant's readiness and security posture for Microsoft 365 Copilot and agents. It runs in your own Azure subscription, reads your tenant with identities you control, and stores its results in the web app's own storage. It holds no secret, and your data goes to no third party.
+Copilot Security & Governance Workbench (CBX) is a web console that assesses a Microsoft 365 tenant's readiness and security posture for Microsoft 365 Copilot and agents. It runs in your own Azure subscription, reads your tenant with identities you control, and stores its results in the web app's own storage. It holds no secret, and your data goes to no third party.
 
 Deployment takes **three stages**. Stage 1 is one button and one Cloud Shell block; Stage 2 is one Cloud Shell block; Stage 3 happens inside the console itself.
 
@@ -131,6 +131,10 @@ Everything it does is listed under the block, with the portal equivalent, so not
     $TenantId         = ''
     $SubscriptionId   = ''
     $ResourceGroup    = 'rg-copilot-blueprint'   # the one you deployed into in 1.1
+    # $GroupName and $AppName are Entra display names, and this block looks those objects up by
+    # them, so they keep the original product name. Renaming them would create a second app and
+    # group instead of finding the existing ones, and the running app's client id would stop
+    # matching.
     $GroupName        = 'Copilot Blueprint Explorer users'
     $MemberUpns       = @()      # the console's users, e.g. 'sam@contoso.com'; you are added automatically
     $AppName          = 'Copilot Blueprint Explorer'
@@ -195,9 +199,9 @@ Everything it does is listed under the block, with the portal equivalent, so not
             requestedAccessTokenVersion = 2
             oauth2PermissionScopes      = @(@{
                 id = $scopeId; value = 'access_as_user'; type = 'User'; isEnabled = $true
-                adminConsentDisplayName = 'Access Copilot Blueprint Explorer'
-                adminConsentDescription = 'Allows the app to call the Copilot Blueprint Explorer API as the signed-in user.'
-                userConsentDisplayName  = 'Access Copilot Blueprint Explorer'
+                adminConsentDisplayName = 'Access Copilot Security & Governance Workbench'
+                adminConsentDescription = 'Allows the app to call the Copilot Security & Governance Workbench API as the signed-in user.'
+                userConsentDisplayName  = 'Access Copilot Security & Governance Workbench'
                 userConsentDescription  = 'Allows the app to call the API on your behalf.'
             })
         }
@@ -404,7 +408,7 @@ Everything it does is listed under the block, with the portal equivalent, so not
 | The block | In the portal |
 |---|---|
 | Access group, with you and any named members | **Entra → Groups → New group**, Security, Assigned |
-| App registration `Copilot Blueprint Explorer`, single tenant | **App registrations → New registration** |
+| App registration `Copilot Security & Governance Workbench`, single tenant | **App registrations → New registration** |
 | `api://<client-id>` and the `access_as_user` scope | **Expose an API → Add → Add a scope** |
 | `requestedAccessTokenVersion: 2` and the `wids` optional claim | **Manifest**, or **Token configuration → Add groups claim → Directory roles** |
 | `User.Read` and `access_as_user`, and nothing else | **API permissions → Add a permission → My APIs** |
@@ -622,7 +626,7 @@ They cannot be granted from inside the console, because granting is exactly what
 3. Select **Grant admin consent in Microsoft Entra**. Microsoft's own consent page opens, listing those three. Select **Accept**.
 4. You are returned to the console. If it still says consent is missing, wait a few seconds and select **Check again** — Entra takes a moment to apply it.
 
-> Prefer to do it in the portal? **App registrations → Copilot Blueprint Explorer → API permissions → Add a permission → Microsoft Graph → Delegated**, add those three, then **Grant admin consent**. The result is identical. The button exists so that nobody has to be talked through the portal.
+> Prefer to do it in the portal? **App registrations → Copilot Security & Governance Workbench → API permissions → Add a permission → Microsoft Graph → Delegated**, add those three, then **Grant admin consent**. The result is identical. The button exists so that nobody has to be talked through the portal.
 
 ### 3.3 Grant the access-group check
 
@@ -773,7 +777,7 @@ To use it:
 
 > **`AADSTS50105` — "The signed in user is blocked because they are not a direct member of a group with access, nor had access directly assigned"**
 >
-> That is Entra's own refusal, not this console's, and naming the person here does not by itself clear it: with **Assignment required = Yes** the token is refused first. Adding a person now assigns them as well, provided you hold a role that can assign users to an application (Cloud Application Administrator or Global Administrator) and the delegated `AppRoleAssignment.ReadWrite.All` permission has been granted. If not, the row says **blocked by Entra** and you can do it in the portal: **Enterprise applications → Copilot Blueprint Explorer → Users and groups → Add user/group**.
+> That is Entra's own refusal, not this console's, and naming the person here does not by itself clear it: with **Assignment required = Yes** the token is refused first. Adding a person now assigns them as well, provided you hold a role that can assign users to an application (Cloud Application Administrator or Global Administrator) and the delegated `AppRoleAssignment.ReadWrite.All` permission has been granted. If not, the row says **blocked by Entra** and you can do it in the portal: **Enterprise applications → Copilot Security & Governance Workbench → Users and groups → Add user/group**.
 >
 > Use the name the person actually signs in with. A guest invited from another tenant signs in with their **home** address (`alex@contoso.com`), which is not the same as the `#EXT#` name Entra stores, and can also differ from their `mail` attribute. The console matches either form; Entra's assignment is by account, so it is unaffected.
 
@@ -796,7 +800,7 @@ Some grants live outside the resource group and are **not** removed when it is d
    - Revoke **Purview collector app** as well.
 2. In Security & Compliance PowerShell: `Remove-RoleGroupMember` for both role groups, then `Remove-ServicePrincipal -Identity "CBX Purview Collector"`.
 3. Delete the **resource group**. This removes the web app, its identities and their Azure role assignments, the Automation account and its certificate.
-4. In Entra, delete the **Copilot Blueprint Explorer** and **CBX Purview Collector** app registrations, and the access group if it is no longer needed.
+4. In Entra, delete the **Copilot Security & Governance Workbench** and **CBX Purview Collector** app registrations, and the access group if it is no longer needed.
 
 ---
 

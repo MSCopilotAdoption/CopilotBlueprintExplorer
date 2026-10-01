@@ -5,16 +5,16 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "11541269174161188984"
+      "templateHash": "1731649776379328813"
     },
-    "description": "Copilot Blueprint Explorer: every Azure resource in one click. Run this first, then the single Cloud Shell block in README.md Stage 1.2, which creates the Entra objects and writes the settings that depend on them."
+    "description": "Copilot Security & Governance Workbench: every Azure resource in one click. Run this first, then the single Cloud Shell block in README.md Stage 1.2, which creates the Entra objects and writes the settings that depend on them."
   },
   "parameters": {
     "apiClientId": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Leave empty. Application (client) ID of the \"Copilot Blueprint Explorer\" app registration, which the Stage 1.2 block creates and fills in."
+        "description": "Leave empty. Application (client) ID of the \"Copilot Security & Governance Workbench\" app registration, which the Stage 1.2 block creates and fills in."
       }
     },
     "securityGroupObjectId": {
@@ -86,6 +86,25 @@
       ],
       "metadata": {
         "description": "App Service plan size. B1 is enough for one customer."
+      }
+    },
+    "deploymentOption": {
+      "type": "string",
+      "defaultValue": "AskCbx",
+      "allowedValues": [
+        "Minimal",
+        "NoAskCbx",
+        "AskCbx"
+      ],
+      "metadata": {
+        "description": "Which edition this instance runs. Minimal hides how-to-fix guidance; AskCbx adds the assistant. The Customer deployment tab sets this for you when it hands over a link."
+      }
+    },
+    "engagementDesign": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Whether this instance carries the engagement design page. False for a customer copy: that page holds the brief and analysis behind a proposal, which is the delivery team's working material."
       }
     },
     "runbookBaseUrl": {
@@ -209,7 +228,11 @@
             },
             {
               "name": "Cbx__DeploymentOption",
-              "value": "AskCbx"
+              "value": "[parameters('deploymentOption')]"
+            },
+            {
+              "name": "Cbx__EngagementDesign",
+              "value": "[string(parameters('engagementDesign'))]"
             },
             {
               "name": "Cbx__AutomationResourceGroup",

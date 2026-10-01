@@ -1,4 +1,4 @@
-metadata description = 'Copilot Blueprint Explorer: every Azure resource in one click. Run this first, then the single Cloud Shell block in README.md Stage 1.2, which creates the Entra objects and writes the settings that depend on them.'
+metadata description = 'Copilot Security & Governance Workbench: every Azure resource in one click. Run this first, then the single Cloud Shell block in README.md Stage 1.2, which creates the Entra objects and writes the settings that depend on them.'
 
 targetScope = 'resourceGroup'
 
@@ -10,7 +10,7 @@ targetScope = 'resourceGroup'
 // writes these same settings. Supply them only when the Entra objects already exist.
 // ---------------------------------------------------------------------------
 
-@description('Leave empty. Application (client) ID of the "Copilot Blueprint Explorer" app registration, which the Stage 1.2 block creates and fills in.')
+@description('Leave empty. Application (client) ID of the "Copilot Security & Governance Workbench" app registration, which the Stage 1.2 block creates and fills in.')
 param apiClientId string = ''
 
 @description('Leave empty. Object ID of the Entra security group whose members may use the console. The Stage 1.2 block creates the group and fills this in.')
@@ -50,6 +50,13 @@ param webAppName string = ''
 @description('App Service plan size. B1 is enough for one customer.')
 @allowed(['B1', 'B2', 'P0v3', 'P1v3'])
 param webAppSku string = 'B1'
+
+@description('Which edition this instance runs. Minimal hides how-to-fix guidance; AskCbx adds the assistant. The Customer deployment tab sets this for you when it hands over a link.')
+@allowed(['Minimal', 'NoAskCbx', 'AskCbx'])
+param deploymentOption string = 'AskCbx'
+
+@description('Whether this instance carries the engagement design page. False for a customer copy: that page holds the brief and analysis behind a proposal, which is the delivery team\'s working material.')
+param engagementDesign bool = false
 
 // ---------------------------------------------------------------------------
 // Collection from Purview and Power Platform. The Automation account is always created: without it
@@ -146,7 +153,8 @@ resource site 'Microsoft.Web/sites@2024-11-01' = {
         // Every deployment carries the assistant; whether it is switched on, and which Foundry
         // project answers, is decided later in Settings. Asking at deploy time only produced
         // deployments that could never enable it without an app-setting change.
-        { name: 'Cbx__DeploymentOption', value: 'AskCbx' }
+        { name: 'Cbx__DeploymentOption', value: deploymentOption }
+        { name: 'Cbx__EngagementDesign', value: string(engagementDesign) }
         { name: 'Cbx__AutomationResourceGroup', value: resourceGroup().name }
         { name: 'Cbx__AutomationAccountName', value: automationName }
         { name: 'Cbx__PurviewCollectorAppId', value: purviewCollectorAppId }
